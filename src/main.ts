@@ -15,6 +15,12 @@ enum TerrainType {
     Grass = 3
 }
 
+enum RenderMode {
+    IsometricTextured = 0,
+    IsometricColored = 1,
+    OrthographicColored = 2
+}
+
 interface WangTileMember {
     id: number;
     role: number;
@@ -90,7 +96,7 @@ class DualGridSystem {
     public width: number;
     public height: number;
     public cells: TerrainType[];
-    public isIsometric: boolean = true;
+    public renderMode: RenderMode = RenderMode.IsometricTextured;
     public cameraOffsetX: number = 0;
     public cameraOffsetY: number = 0;
 
@@ -162,15 +168,15 @@ class DualGridSystem {
                     // 2. Calculate Position
                     let drawX, drawY;
 
-                    if (this.isIsometric) {
-                        // Isometric Projection Formula
+                    if (this.renderMode === RenderMode.OrthographicColored) {
+                        // Standard Top-Down with camera offset
+                        drawX = originX + x * 40; // 40px square size for top-down debug
+                        drawY = originY + y * 40;
+                    } else {
+                        // Isometric Projection Formula (for both textured and colored)
                         // x * 0.5 * width  +  y * -0.5 * width
                         drawX = originX + (x - y) * (TILE_WIDTH / 2);
                         drawY = originY + (x + y) * (TILE_HEIGHT / 2);
-                    } else {
-                        // Standard Top-Down
-                        drawX = x * 40; // 40px square size for top-down debug
-                        drawY = y * 40;
                     }
 
                     // 3. Draw Tile (Sprite or Procedural)
@@ -186,18 +192,26 @@ class DualGridSystem {
         tl: TerrainType, tr: TerrainType, bl: TerrainType, br: TerrainType,
         terrainLayer: TerrainType
     ) {
-        if (this.isIsometric) {
-            // Calculate Wang tile role based on which corners match this terrain layer
-            // Wang tile bitmask: TL=1, TR=2, BL=4, BR=8
-            let role = 0;
-            if (tl === terrainLayer) role |= 1;
-            if (tr === terrainLayer) role |= 2;
-            if (bl === terrainLayer) role |= 4;
-            if (br === terrainLayer) role |= 8;
+        // Calculate Wang tile role based on which corners match this terrain layer
+        // Wang tile bitmask: TL=1, TR=2, BL=4, BR=8
+        let role = 0;
+        if (tl === terrainLayer) role |= 1;
+        if (tr === terrainLayer) role |= 2;
+        if (bl === terrainLayer) role |= 4;
+        if (br === terrainLayer) role |= 8;
 
-            // Skip if role is 0 (no corners match)
-            if (role === 0) return;
+        // Skip if role is 0 (no corners match)
+        if (role === 0) return;
 
+        const colors = {
+            [TerrainType.Water]: '#225588',
+            [TerrainType.Sand]:  '#eebb44',
+            [TerrainType.Dirt]:  '#885533',
+            [TerrainType.Grass]: '#44aa44'
+        };
+
+        if (this.renderMode === RenderMode.IsometricTextured) {
+            // Textured Isometric Mode
             const assets = terrainAssets.get(terrainLayer);
             if (!assets) return;
 
@@ -218,15 +232,19 @@ class DualGridSystem {
                 TILE_WIDTH, TILE_HEIGHT
             );
 
-        } else {
-            // Standard Square Debug Drawing (fallback for top-down mode)
-            const colors = {
-                [TerrainType.Water]: '#225588',
-                [TerrainType.Sand]:  '#eebb44',
-                [TerrainType.Dirt]:  '#885533',
-                [TerrainType.Grass]: '#44aa44'
-            };
+        } else if (this.renderMode === RenderMode.IsometricColored) {
+            // Colored Isometric Mode - draw a diamond with solid color
+            ctx.fillStyle = colors[terrainLayer];
+            ctx.beginPath();
+            ctx.moveTo(x, y - TILE_HEIGHT / 2);  // Top
+            ctx.lineTo(x + TILE_WIDTH / 2, y);   // Right
+            ctx.lineTo(x, y + TILE_HEIGHT / 2);  // Bottom
+            ctx.lineTo(x - TILE_WIDTH / 2, y);   // Left
+            ctx.closePath();
+            ctx.fill();
 
+        } else {
+            // Orthographic Colored Mode - draw 4 quadrants
             const size = 40;
             const half = size / 2;
 
@@ -301,10 +319,21 @@ document.getElementById('btnRegenerate')!.addEventListener('click', () => {
     grid.generatePerlinMap();
 });
 
-document.getElementById('btnToggleIso')!.addEventListener('click', () => {
-    console.log("Toggling isometric mode...");
-    grid.isIsometric = !grid.isIsometric;
+const btnToggleIso = document.getElementById('btnToggleIso')!;
+
+function updateButtonText() {
+    const modeNames = ['Isometric Textured', 'Isometric Colored', 'Orthographic Colored'];
+    btnToggleIso.textContent = modeNames[grid.renderMode];
+}
+
+btnToggleIso.addEventListener('click', () => {
+    console.log("Cycling render mode...");
+    grid.renderMode = (grid.renderMode + 1) % 3;
+    updateButtonText();
 });
+
+// Set initial button text
+updateButtonText();
 
 // Handle resize
 window.addEventListener('resize', () => {
