@@ -94,7 +94,19 @@ Perlin noise parameters in `generatePerlinMap()`:
 The main class is `DualGridSystem` which handles:
 - Terrain data storage and access
 - Perlin noise map generation
-- Dual-grid tile rendering logic
-- Projection mode switching
+- Dual-grid tile rendering logic with proper layering (Water → Sand → Dirt → Grass)
+- Projection mode switching (Isometric ↔ Top-down)
+- Camera offset for panning the map
 
-Current rendering uses procedural debug visualization (colored quadrants). To integrate actual sprites, replace the `drawTile()` method with sprite atlas lookups using the Wang tile metadata.
+### Controls
+
+- **Mouse drag**: Pan/scroll the map by clicking and dragging
+- **New Random Map button**: Regenerate terrain with new Perlin noise
+- **Toggle Isometric button**: Switch between isometric and top-down view
+
+### Rendering
+
+The renderer uses actual sprite textures loaded from `/public/` with Wang tiling:
+- Each terrain type has 15 tile variants based on corner matching
+- Tiles are drawn in layers to ensure proper visual stacking
+- Wang tile role is calculated using bitmask: TL=1, TR=2, BL=4, BR=8
