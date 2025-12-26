@@ -163,7 +163,18 @@
                 Transition Layer
             </label>
         </div>
-        <span style="color:#888; margin-left: 20px;">Drag to pan the map</span>
+        <div class="checkbox-group">
+            <span style="color:#aaa">Debug:</span>
+            <label>
+                <input type="checkbox" id="chkWorldGrid">
+                World Grid
+            </label>
+            <label>
+                <input type="checkbox" id="chkDualGrid">
+                Dual Grid
+            </label>
+        </div>
+        <span style="color:#888; margin-left: 20px;">Drag to pan, click tile to debug</span>
     </div>
 
     <canvas id="gridCanvas"></canvas>

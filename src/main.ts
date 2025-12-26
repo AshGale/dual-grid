@@ -128,6 +128,8 @@ class DualGridSystem {
     public cameraOffsetY: number = 0;
     public showBaseLayer: boolean = true;
     public showTransitionLayer: boolean = true;
+    public showWorldGrid: boolean = false;
+    public showDualGrid: boolean = false;
     private debugTileX: number = -1;
     private debugTileY: number = -1;
 
@@ -305,6 +307,158 @@ class DualGridSystem {
                         this.drawTileByRole(ctx, drawX, drawY, currentLayer, role);
                     }
                 }
+            }
+        }
+
+        // DEBUG OVERLAYS - World Grid (shows cell boundaries)
+        if (this.showWorldGrid) {
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+            ctx.lineWidth = 1;
+
+            if (this.renderMode === RenderMode.OrthographicColored) {
+                // Orthographic grid
+                for (let y = 0; y <= this.height; y++) {
+                    for (let x = 0; x <= this.width; x++) {
+                        const drawX = originX + x * 40;
+                        const drawY = originY + y * 40;
+                        if (x < this.width) {
+                            ctx.beginPath();
+                            ctx.moveTo(drawX, drawY);
+                            ctx.lineTo(drawX + 40, drawY);
+                            ctx.stroke();
+                        }
+                        if (y < this.height) {
+                            ctx.beginPath();
+                            ctx.moveTo(drawX, drawY);
+                            ctx.lineTo(drawX, drawY + 40);
+                            ctx.stroke();
+                        }
+                    }
+                }
+            } else {
+                // Isometric grid - draw diamond shapes for each cell
+                for (let y = 0; y < this.height; y++) {
+                    for (let x = 0; x < this.width; x++) {
+                        const centerX = x;
+                        const centerY = y;
+                        const drawX = originX + (centerX - centerY) * (TILE_WIDTH / 2);
+                        const drawY = originY + (centerX + centerY) * (TILE_HEIGHT / 2);
+
+                        ctx.beginPath();
+                        ctx.moveTo(drawX, drawY - TILE_HEIGHT / 2);
+                        ctx.lineTo(drawX + TILE_WIDTH / 2, drawY);
+                        ctx.lineTo(drawX, drawY + TILE_HEIGHT / 2);
+                        ctx.lineTo(drawX - TILE_WIDTH / 2, drawY);
+                        ctx.closePath();
+                        ctx.stroke();
+                    }
+                }
+            }
+        }
+
+        // DEBUG OVERLAYS - Dual Grid (shows tile boundaries)
+        if (this.showDualGrid) {
+            ctx.strokeStyle = 'rgba(255, 200, 0, 0.5)';
+            ctx.lineWidth = 2;
+
+            if (this.renderMode === RenderMode.OrthographicColored) {
+                // Orthographic dual grid - offset by half
+                for (let y = 0; y < this.height - 1; y++) {
+                    for (let x = 0; x < this.width - 1; x++) {
+                        const drawX = originX + x * 40;
+                        const drawY = originY + y * 40;
+                        ctx.strokeRect(drawX, drawY, 40, 40);
+                    }
+                }
+            } else {
+                // Isometric dual grid
+                for (let y = 0; y < this.height - 1; y++) {
+                    for (let x = 0; x < this.width - 1; x++) {
+                        const centerX = x + 0.5;
+                        const centerY = y + 0.5;
+                        const drawX = originX + (centerX - centerY) * (TILE_WIDTH / 2);
+                        const drawY = originY + (centerX + centerY) * (TILE_HEIGHT / 2);
+
+                        ctx.beginPath();
+                        ctx.moveTo(drawX, drawY - TILE_HEIGHT / 2);
+                        ctx.lineTo(drawX + TILE_WIDTH / 2, drawY);
+                        ctx.lineTo(drawX, drawY + TILE_HEIGHT / 2);
+                        ctx.lineTo(drawX - TILE_WIDTH / 2, drawY);
+                        ctx.closePath();
+                        ctx.stroke();
+                    }
+                }
+            }
+        }
+
+        // DEBUG INDICATORS - Show selected tile and its corners
+        if (this.debugTileX >= 0 && this.debugTileY >= 0) {
+            const x = this.debugTileX;
+            const y = this.debugTileY;
+
+            if (this.renderMode === RenderMode.OrthographicColored) {
+                // Draw corner dots in orthographic mode
+                const corners = [
+                    { cx: x, cy: y },           // TL
+                    { cx: x + 1, cy: y },       // TR
+                    { cx: x, cy: y + 1 },       // BL
+                    { cx: x + 1, cy: y + 1 }    // BR
+                ];
+
+                corners.forEach(corner => {
+                    const drawX = originX + corner.cx * 40;
+                    const drawY = originY + corner.cy * 40;
+
+                    ctx.fillStyle = 'rgba(255, 0, 0, 0.8)';
+                    ctx.beginPath();
+                    ctx.arc(drawX, drawY, 6, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
+                    ctx.lineWidth = 2;
+                    ctx.stroke();
+                });
+
+                // Highlight the tile area
+                ctx.strokeStyle = 'rgba(0, 255, 255, 0.8)';
+                ctx.lineWidth = 3;
+                ctx.strokeRect(originX + x * 40, originY + y * 40, 40, 40);
+            } else {
+                // Draw corner dots in isometric mode
+                const corners = [
+                    { cx: x, cy: y },           // TL
+                    { cx: x + 1, cy: y },       // TR
+                    { cx: x, cy: y + 1 },       // BL
+                    { cx: x + 1, cy: y + 1 }    // BR
+                ];
+
+                corners.forEach(corner => {
+                    const drawX = originX + (corner.cx - corner.cy) * (TILE_WIDTH / 2);
+                    const drawY = originY + (corner.cx + corner.cy) * (TILE_HEIGHT / 2);
+
+                    ctx.fillStyle = 'rgba(255, 0, 0, 0.8)';
+                    ctx.beginPath();
+                    ctx.arc(drawX, drawY, 6, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
+                    ctx.lineWidth = 2;
+                    ctx.stroke();
+                });
+
+                // Highlight the tile area
+                const centerX = x + 0.5;
+                const centerY = y + 0.5;
+                const drawX = originX + (centerX - centerY) * (TILE_WIDTH / 2);
+                const drawY = originY + (centerX + centerY) * (TILE_HEIGHT / 2);
+
+                ctx.strokeStyle = 'rgba(0, 255, 255, 0.8)';
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                ctx.moveTo(drawX, drawY - TILE_HEIGHT / 2);
+                ctx.lineTo(drawX + TILE_WIDTH / 2, drawY);
+                ctx.lineTo(drawX, drawY + TILE_HEIGHT / 2);
+                ctx.lineTo(drawX - TILE_WIDTH / 2, drawY);
+                ctx.closePath();
+                ctx.stroke();
             }
         }
     }
@@ -506,6 +660,20 @@ chkBaseLayer.addEventListener('change', () => {
 chkTransitionLayer.addEventListener('change', () => {
     grid.showTransitionLayer = chkTransitionLayer.checked;
     console.log("Transition layer:", grid.showTransitionLayer);
+});
+
+// Debug grid checkboxes
+const chkWorldGrid = document.getElementById('chkWorldGrid') as HTMLInputElement;
+const chkDualGrid = document.getElementById('chkDualGrid') as HTMLInputElement;
+
+chkWorldGrid.addEventListener('change', () => {
+    grid.showWorldGrid = chkWorldGrid.checked;
+    console.log("World grid:", grid.showWorldGrid);
+});
+
+chkDualGrid.addEventListener('change', () => {
+    grid.showDualGrid = chkDualGrid.checked;
+    console.log("Dual grid:", grid.showDualGrid);
 });
 
 // Handle resize
