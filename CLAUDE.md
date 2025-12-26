@@ -42,24 +42,46 @@ Wang tile roles (corner bitmask):
 
 ### Running the Application
 
-Simply open [index.html](index.html) in a modern browser. No build step or local server required.
+This project uses Vite for development and building.
+
+**Development server:**
+```bash
+npm run dev
+```
+
+**Build for production:**
+```bash
+npm run build
+```
+
+**Preview production build:**
+```bash
+npm run preview
+```
 
 ### Technology Stack
 
-- **TypeScript**: Written in TypeScript but transpiled in-browser via Babel standalone
-- **SimplexNoise**: CDN-loaded library for Perlin noise generation (v2.4.0)
+- **Vite**: Fast development server and build tool
+- **TypeScript**: Proper TypeScript compilation (no in-browser transpilation)
+- **SimplexNoise**: Perlin noise generation library (v4.0+)
 - **Canvas API**: Direct 2D rendering with `image-rendering: pixelated` for crisp pixel art
+
+### Project Structure
+
+- `/src/main.ts` - Main application code
+- `/public/` - Static assets (terrain sprites and Wang tile metadata)
+- `/index.html` - Entry point HTML file
 
 ### Key Constants
 
-Located at the top of the script block in [index.html:61-64](index.html#L61-L64):
+Located at the top of [src/main.ts](src/main.ts):
 - `TILE_WIDTH = 64`: Isometric tile width
 - `TILE_HEIGHT = 32`: Isometric tile height (half of width for 2:1 ratio)
 - `GRID_SIZE = 30`: Data grid dimensions (30×30 cells)
 
 ### Terrain Generation
 
-Perlin noise parameters in `generatePerlinMap()` ([index.html:102-121](index.html#L102-L121)):
+Perlin noise parameters in `generatePerlinMap()`:
 - `scale = 0.08`: Noise frequency (lower = larger landmasses)
 - Threshold values map noise (-1 to 1) to terrain types:
   - `< -0.2`: Water

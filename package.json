@@ -1,0 +1,19 @@
+{
+  "name": "dual-grid",
+  "version": "1.0.0",
+  "description": "Isometric terrain renderer with dual-grid tile mapping",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "simplex-noise": "^4.0.3",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.0"
+  }
+}
