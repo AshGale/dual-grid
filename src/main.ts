@@ -99,6 +99,8 @@ class DualGridSystem {
     public renderMode: RenderMode = RenderMode.IsometricTextured;
     public cameraOffsetX: number = 0;
     public cameraOffsetY: number = 0;
+    public showBaseLayer: boolean = true;
+    public showTransitionLayer: boolean = true;
 
     constructor(width: number, height: number) {
         this.width = width;
@@ -145,45 +147,83 @@ class DualGridSystem {
         const originX = canvasWidth / 2 + this.cameraOffsetX;
         const originY = canvasHeight / 2 + this.cameraOffsetY;
 
-        // Draw in layers: Water -> Sand -> Dirt -> Grass
-        // This ensures proper visual stacking
+        // TWO-PASS RENDERING SYSTEM:
+        // Pass 1: Base layer - draw full tiles (role 15 = all 4 corners match)
+        // Pass 2: Transition layer - draw edge/corner tiles (role != 15)
+
+        // PASS 1: BASE FULL TILES
+        // Draw in terrain order: Water -> Sand -> Dirt -> Grass
         const layerOrder = [TerrainType.Water, TerrainType.Sand, TerrainType.Dirt, TerrainType.Grass];
 
-        for (const terrainLayer of layerOrder) {
-            for (let y = 0; y < this.height - 1; y++) {
-                for (let x = 0; x < this.width - 1; x++) {
+        if (this.showBaseLayer) {
+            for (const terrainLayer of layerOrder) {
+                for (let y = 0; y < this.height - 1; y++) {
+                    for (let x = 0; x < this.width - 1; x++) {
+                        // Get the 4 corner cells
+                        const tl = this.getCell(x, y);
+                        const tr = this.getCell(x + 1, y);
+                        const bl = this.getCell(x, y + 1);
+                        const br = this.getCell(x + 1, y + 1);
 
-                    // 1. Get Neighbors (Dual Grid Logic)
-                    const tl = this.getCell(x, y);
-                    const tr = this.getCell(x + 1, y);
-                    const bl = this.getCell(x, y + 1);
-                    const br = this.getCell(x + 1, y + 1);
+                        // Only draw if ALL 4 corners match this terrain (full tile)
+                        if (tl === terrainLayer && tr === terrainLayer &&
+                            bl === terrainLayer && br === terrainLayer) {
 
-                    // Skip if none of the corners match this layer
-                    if (tl !== terrainLayer && tr !== terrainLayer &&
-                        bl !== terrainLayer && br !== terrainLayer) {
-                        continue;
+                            const { drawX, drawY } = this.calculateTilePosition(x, y, originX, originY);
+                            this.drawTile(ctx, drawX, drawY, tl, tr, bl, br, terrainLayer);
+                        }
                     }
-
-                    // 2. Calculate Position
-                    let drawX, drawY;
-
-                    if (this.renderMode === RenderMode.OrthographicColored) {
-                        // Standard Top-Down with camera offset
-                        drawX = originX + x * 40; // 40px square size for top-down debug
-                        drawY = originY + y * 40;
-                    } else {
-                        // Isometric Projection Formula (for both textured and colored)
-                        // x * 0.5 * width  +  y * -0.5 * width
-                        drawX = originX + (x - y) * (TILE_WIDTH / 2);
-                        drawY = originY + (x + y) * (TILE_HEIGHT / 2);
-                    }
-
-                    // 3. Draw Tile (Sprite or Procedural)
-                    this.drawTile(ctx, drawX, drawY, tl, tr, bl, br, terrainLayer);
                 }
             }
         }
+
+        // PASS 2: TRANSITION TILES
+        // Draw in terrain order to ensure proper layering
+        if (this.showTransitionLayer) {
+            for (const terrainLayer of layerOrder) {
+                for (let y = 0; y < this.height - 1; y++) {
+                    for (let x = 0; x < this.width - 1; x++) {
+                        const tl = this.getCell(x, y);
+                        const tr = this.getCell(x + 1, y);
+                        const bl = this.getCell(x, y + 1);
+                        const br = this.getCell(x + 1, y + 1);
+
+                        // Skip if this is a full tile (already drawn in pass 1)
+                        const isFullTile = (tl === tr && tr === bl && bl === br);
+                        if (isFullTile) continue;
+
+                        // Skip if none of the corners match this terrain layer
+                        if (tl !== terrainLayer && tr !== terrainLayer &&
+                            bl !== terrainLayer && br !== terrainLayer) {
+                            continue;
+                        }
+
+                        const { drawX, drawY } = this.calculateTilePosition(x, y, originX, originY);
+                        this.drawTile(ctx, drawX, drawY, tl, tr, bl, br, terrainLayer);
+                    }
+                }
+            }
+        }
+    }
+
+    private calculateTilePosition(x: number, y: number, originX: number, originY: number): { drawX: number, drawY: number } {
+        let drawX, drawY;
+
+        if (this.renderMode === RenderMode.OrthographicColored) {
+            // Standard Top-Down with camera offset
+            drawX = originX + x * 40; // 40px square size for top-down debug
+            drawY = originY + y * 40;
+        } else {
+            // Isometric Projection Formula (for both textured and colored)
+            // For dual-grid, the tile is centered between 4 corner points
+            // We need to offset by 0.5 in both x and y to center the tile
+            const centerX = x + 0.5;
+            const centerY = y + 0.5;
+            drawX = originX + (centerX - centerY) * (TILE_WIDTH / 2);
+            drawY = originY + (centerX + centerY) * (TILE_HEIGHT / 2);
+        }
+
+        return { drawX, drawY };
     }
 
     private drawTile(
@@ -360,6 +400,20 @@ btnOrtho.addEventListener('click', () => {
 
 // Set initial active button
 updateActiveButton();
+
+// Layer visibility checkboxes
+const chkBaseLayer = document.getElementById('chkBaseLayer') as HTMLInputElement;
+const chkTransitionLayer = document.getElementById('chkTransitionLayer') as HTMLInputElement;
+
+chkBaseLayer.addEventListener('change', () => {
+    grid.showBaseLayer = chkBaseLayer.checked;
+    console.log("Base layer:", grid.showBaseLayer);
+});
+
+chkTransitionLayer.addEventListener('change', () => {
+    grid.showTransitionLayer = chkTransitionLayer.checked;
+    console.log("Transition layer:", grid.showTransitionLayer);
+});
 
 // Handle resize
 window.addEventListener('resize', () => {
