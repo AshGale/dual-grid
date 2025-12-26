@@ -41,6 +41,33 @@ interface TerrainAssets {
 const terrainAssets: Map<TerrainType, TerrainAssets> = new Map();
 let assetsLoaded = false;
 
+// --- DEBUG SYSTEM ---
+interface TileDebugInfo {
+    gridX: number;
+    gridY: number;
+    corners: {
+        tl: TerrainType;
+        tr: TerrainType;
+        bl: TerrainType;
+        br: TerrainType;
+    };
+    baseLayer: {
+        terrain: TerrainType;
+        role: number;
+        tileId?: number;
+    };
+    transitionLayers: Array<{
+        terrain: TerrainType;
+        role: number;
+        tileId?: number;
+        drawn: boolean;
+        reason: string;
+    }>;
+}
+
+let debugMode = false;
+let selectedTileDebugInfo: TileDebugInfo | null = null;
+
 // --- ASSET LOADING FUNCTIONS ---
 async function loadTerrainAssets(): Promise<void> {
     console.log("Starting to load terrain assets...");
@@ -101,6 +128,8 @@ class DualGridSystem {
     public cameraOffsetY: number = 0;
     public showBaseLayer: boolean = true;
     public showTransitionLayer: boolean = true;
+    private debugTileX: number = -1;
+    private debugTileY: number = -1;
 
     constructor(width: number, height: number) {
         this.width = width;
@@ -117,6 +146,77 @@ class DualGridSystem {
         if (x >= 0 && x < this.width && y >= 0 && y < this.height) {
             this.cells[y * this.width + x] = type;
         }
+    }
+
+    public setDebugTile(x: number, y: number) {
+        this.debugTileX = x;
+        this.debugTileY = y;
+    }
+
+    public getDebugInfo(x: number, y: number): TileDebugInfo | null {
+        if (x < 0 || x >= this.width - 1 || y < 0 || y >= this.height - 1) {
+            return null;
+        }
+
+        const tl = this.getCell(x, y);
+        const tr = this.getCell(x + 1, y);
+        const bl = this.getCell(x, y + 1);
+        const br = this.getCell(x + 1, y + 1);
+
+        const debugInfo: TileDebugInfo = {
+            gridX: x,
+            gridY: y,
+            corners: { tl, tr, bl, br },
+            baseLayer: {
+                terrain: Math.min(tl, tr, bl, br),
+                role: 15,
+                tileId: undefined
+            },
+            transitionLayers: []
+        };
+
+        // Get base layer tile ID
+        const baseAssets = terrainAssets.get(debugInfo.baseLayer.terrain);
+        if (baseAssets) {
+            debugInfo.baseLayer.tileId = baseAssets.roleToId.get(15);
+        }
+
+        // Calculate transition layers
+        const layerOrder = [TerrainType.Sand, TerrainType.Dirt, TerrainType.Grass];
+        for (const currentLayer of layerOrder) {
+            let role = 0;
+            if (tl >= currentLayer) role |= 1;
+            if (tr >= currentLayer) role |= 2;
+            if (bl >= currentLayer) role |= 4;
+            if (br >= currentLayer) role |= 8;
+
+            let drawn = false;
+            let reason = '';
+            let tileId: number | undefined = undefined;
+
+            if (role === 0) {
+                reason = 'Skipped: No corners at this priority level';
+            } else if (role === 15) {
+                reason = 'Skipped: Full tile (already in base layer)';
+            } else {
+                drawn = true;
+                reason = 'Drawn: Partial transition tile';
+                const assets = terrainAssets.get(currentLayer);
+                if (assets) {
+                    tileId = assets.roleToId.get(role);
+                }
+            }
+
+            debugInfo.transitionLayers.push({
+                terrain: currentLayer,
+                role,
+                tileId,
+                drawn,
+                reason
+            });
+        }
+
+        return debugInfo;
     }
 
     public generatePerlinMap() {
@@ -154,8 +254,6 @@ class DualGridSystem {
         // PASS 1: BASE FULL TILES
         // For base layer, we need to ensure EVERY tile has a background
         // Strategy: Draw the lowest terrain type from the 4 corners as the base
-        const layerOrder = [TerrainType.Water, TerrainType.Sand, TerrainType.Dirt, TerrainType.Grass];
-
         if (this.showBaseLayer) {
             for (let y = 0; y < this.height - 1; y++) {
                 for (let x = 0; x < this.width - 1; x++) {
@@ -171,15 +269,19 @@ class DualGridSystem {
 
                     // Draw a full tile of the lowest terrain type as the base
                     const { drawX, drawY } = this.calculateTilePosition(x, y, originX, originY);
-                    this.drawTile(ctx, drawX, drawY, minTerrain, minTerrain, minTerrain, minTerrain, minTerrain);
+                    this.drawTileByRole(ctx, drawX, drawY, minTerrain, 15);
                 }
             }
         }
 
-        // PASS 2: TRANSITION TILES
-        // Draw in terrain order to ensure proper layering
+        // PASS 2: TRANSITION TILES - MULTI-PASS SPLATTING
+        // Draw layers in priority order (Sand → Dirt → Grass)
+        // Each layer "splats" onto lower layers, creating natural coastlines
+        // Skip Water (0) since it's already the base layer
         if (this.showTransitionLayer) {
-            for (const terrainLayer of layerOrder) {
+            const layerOrder = [TerrainType.Sand, TerrainType.Dirt, TerrainType.Grass];
+
+            for (const currentLayer of layerOrder) {
                 for (let y = 0; y < this.height - 1; y++) {
                     for (let x = 0; x < this.width - 1; x++) {
                         const tl = this.getCell(x, y);
@@ -187,18 +289,20 @@ class DualGridSystem {
                         const bl = this.getCell(x, y + 1);
                         const br = this.getCell(x + 1, y + 1);
 
-                        // Skip if this is a full tile (already drawn in pass 1)
-                        const isFullTile = (tl === tr && tr === bl && bl === br);
-                        if (isFullTile) continue;
+                        // Calculate bitmask using >= comparison
+                        // Any terrain at or above current layer priority is treated as 1
+                        // Any terrain below current layer is treated as 0
+                        let role = 0;
+                        if (tl >= currentLayer) role |= 1;  // TL
+                        if (tr >= currentLayer) role |= 2;  // TR
+                        if (bl >= currentLayer) role |= 4;  // BL
+                        if (br >= currentLayer) role |= 8;  // BR
 
-                        // Skip if none of the corners match this terrain layer
-                        if (tl !== terrainLayer && tr !== terrainLayer &&
-                            bl !== terrainLayer && br !== terrainLayer) {
-                            continue;
-                        }
+                        // Skip if role is 0 (no corners at this priority) or 15 (full tile, already in base)
+                        if (role === 0 || role === 15) continue;
 
                         const { drawX, drawY } = this.calculateTilePosition(x, y, originX, originY);
-                        this.drawTile(ctx, drawX, drawY, tl, tr, bl, br, terrainLayer);
+                        this.drawTileByRole(ctx, drawX, drawY, currentLayer, role);
                     }
                 }
             }
@@ -225,20 +329,12 @@ class DualGridSystem {
         return { drawX, drawY };
     }
 
-    private drawTile(
+    private drawTileByRole(
         ctx: CanvasRenderingContext2D,
         x: number, y: number,
-        tl: TerrainType, tr: TerrainType, bl: TerrainType, br: TerrainType,
-        terrainLayer: TerrainType
+        terrainLayer: TerrainType,
+        role: number
     ) {
-        // Calculate Wang tile role based on which corners match this terrain layer
-        // Wang tile bitmask: TL=1, TR=2, BL=4, BR=8
-        let role = 0;
-        if (tl === terrainLayer) role |= 1;
-        if (tr === terrainLayer) role |= 2;
-        if (bl === terrainLayer) role |= 4;
-        if (br === terrainLayer) role |= 8;
-
         // Skip if role is 0 (no corners match)
         if (role === 0) return;
 
@@ -283,24 +379,22 @@ class DualGridSystem {
             ctx.fill();
 
         } else {
-            // Orthographic Colored Mode - draw 4 quadrants
+            // Orthographic Colored Mode - draw quadrants based on role bitmask
             const size = 40;
             const half = size / 2;
 
-            if (tl === terrainLayer) {
-                ctx.fillStyle = colors[tl];
+            ctx.fillStyle = colors[terrainLayer];
+
+            if (role & 1) {  // TL
                 ctx.fillRect(x, y, half, half);
             }
-            if (tr === terrainLayer) {
-                ctx.fillStyle = colors[tr];
+            if (role & 2) {  // TR
                 ctx.fillRect(x + half, y, half, half);
             }
-            if (bl === terrainLayer) {
-                ctx.fillStyle = colors[bl];
+            if (role & 4) {  // BL
                 ctx.fillRect(x, y + half, half, half);
             }
-            if (br === terrainLayer) {
-                ctx.fillStyle = colors[br];
+            if (role & 8) {  // BR
                 ctx.fillRect(x + half, y + half, half, half);
             }
         }
@@ -423,11 +517,15 @@ window.addEventListener('resize', () => {
 let isDragging = false;
 let lastMouseX = 0;
 let lastMouseY = 0;
+let dragStartX = 0;
+let dragStartY = 0;
 
 canvas.addEventListener('mousedown', (e) => {
     isDragging = true;
     lastMouseX = e.clientX;
     lastMouseY = e.clientY;
+    dragStartX = e.clientX;
+    dragStartY = e.clientY;
 });
 
 canvas.addEventListener('mousemove', (e) => {
@@ -443,10 +541,162 @@ canvas.addEventListener('mousemove', (e) => {
     lastMouseY = e.clientY;
 });
 
-canvas.addEventListener('mouseup', () => {
+canvas.addEventListener('mouseup', (e) => {
+    // Only treat as click if mouse didn't move much (< 5 pixels)
+    const dragDistance = Math.sqrt(
+        Math.pow(e.clientX - dragStartX, 2) + Math.pow(e.clientY - dragStartY, 2)
+    );
+
+    if (dragDistance < 5) {
+        handleTileClick(e);
+    }
+
     isDragging = false;
 });
 
 canvas.addEventListener('mouseleave', () => {
     isDragging = false;
 });
+
+// --- DEBUG PANEL ---
+const debugPanel = document.getElementById('debugPanel')!;
+const debugContent = document.getElementById('debugContent')!;
+const closeDebugBtn = document.getElementById('closeDebug')!;
+
+closeDebugBtn.addEventListener('click', () => {
+    debugPanel.classList.remove('open');
+});
+
+function handleTileClick(e: MouseEvent) {
+    const rect = canvas.getBoundingClientRect();
+    const canvasX = e.clientX - rect.left;
+    const canvasY = e.clientY - rect.top;
+
+    // Convert screen coordinates to grid coordinates
+    const gridCoords = screenToGrid(canvasX, canvasY);
+
+    if (gridCoords) {
+        const debugInfo = grid.getDebugInfo(gridCoords.x, gridCoords.y);
+        if (debugInfo) {
+            selectedTileDebugInfo = debugInfo;
+            grid.setDebugTile(gridCoords.x, gridCoords.y);
+            displayDebugInfo(debugInfo);
+            debugPanel.classList.add('open');
+        }
+    }
+}
+
+function screenToGrid(screenX: number, screenY: number): { x: number; y: number } | null {
+    const originX = canvas.width / 2 + grid.cameraOffsetX;
+    const originY = canvas.height / 2 + grid.cameraOffsetY;
+
+    if (grid.renderMode === RenderMode.OrthographicColored) {
+        // Orthographic mode - simple calculation
+        const gridX = Math.floor((screenX - originX) / 40);
+        const gridY = Math.floor((screenY - originY) / 40);
+        return { x: gridX, y: gridY };
+    } else {
+        // Isometric mode - inverse transformation
+        // Convert screen position relative to origin
+        const relX = screenX - originX;
+        const relY = screenY - originY;
+
+        // Inverse isometric projection
+        // Original: drawX = (x - y) * (TILE_WIDTH / 2), drawY = (x + y) * (TILE_HEIGHT / 2)
+        // Solving for x and y:
+        const x = (relX / (TILE_WIDTH / 2) + relY / (TILE_HEIGHT / 2)) / 2;
+        const y = (relY / (TILE_HEIGHT / 2) - relX / (TILE_WIDTH / 2)) / 2;
+
+        // Adjust for the 0.5 offset used in rendering (centering)
+        const gridX = Math.floor(x);
+        const gridY = Math.floor(y);
+
+        return { x: gridX, y: gridY };
+    }
+}
+
+function getTerrainName(terrain: TerrainType): string {
+    return ['Water', 'Sand', 'Dirt', 'Grass'][terrain];
+}
+
+function getTerrainClass(terrain: TerrainType): string {
+    return ['terrain-water', 'terrain-sand', 'terrain-dirt', 'terrain-grass'][terrain];
+}
+
+function formatBitmask(role: number): string {
+    const bits = [
+        role & 1 ? 'TL' : '--',
+        role & 2 ? 'TR' : '--',
+        role & 4 ? 'BL' : '--',
+        role & 8 ? 'BR' : '--'
+    ];
+    return `${bits.join(' ')} (${role})`;
+}
+
+function displayDebugInfo(info: TileDebugInfo) {
+    const html = `
+        <div class="debug-section">
+            <h4>Tile Position</h4>
+            <div class="debug-row">
+                <span class="debug-label">Grid Coordinates:</span>
+                <span class="debug-value">(${info.gridX}, ${info.gridY})</span>
+            </div>
+        </div>
+
+        <div class="debug-section">
+            <h4>Corner Terrain Types</h4>
+            <div class="debug-row">
+                <span class="debug-label">Top-Left:</span>
+                <span class="debug-value ${getTerrainClass(info.corners.tl)}">${getTerrainName(info.corners.tl)}</span>
+            </div>
+            <div class="debug-row">
+                <span class="debug-label">Top-Right:</span>
+                <span class="debug-value ${getTerrainClass(info.corners.tr)}">${getTerrainName(info.corners.tr)}</span>
+            </div>
+            <div class="debug-row">
+                <span class="debug-label">Bottom-Left:</span>
+                <span class="debug-value ${getTerrainClass(info.corners.bl)}">${getTerrainName(info.corners.bl)}</span>
+            </div>
+            <div class="debug-row">
+                <span class="debug-label">Bottom-Right:</span>
+                <span class="debug-value ${getTerrainClass(info.corners.br)}">${getTerrainName(info.corners.br)}</span>
+            </div>
+        </div>
+
+        <div class="debug-section">
+            <h4>Base Layer</h4>
+            <div class="debug-row">
+                <span class="debug-label">Terrain:</span>
+                <span class="debug-value ${getTerrainClass(info.baseLayer.terrain)}">${getTerrainName(info.baseLayer.terrain)}</span>
+            </div>
+            <div class="debug-row">
+                <span class="debug-label">Role:</span>
+                <span class="debug-value">${info.baseLayer.role} (Full Tile)</span>
+            </div>
+            <div class="debug-row">
+                <span class="debug-label">Tile ID:</span>
+                <span class="debug-value">${info.baseLayer.tileId ?? 'N/A'}</span>
+            </div>
+        </div>
+
+        ${info.transitionLayers.map(layer => `
+            <div class="debug-section" style="border-left: 3px solid ${layer.drawn ? '#4da6ff' : '#666'}">
+                <h4>${getTerrainName(layer.terrain)} Layer ${layer.drawn ? '✓ DRAWN' : '✗ SKIPPED'}</h4>
+                <div class="debug-row">
+                    <span class="debug-label">Role Bitmask:</span>
+                    <span class="debug-value">${formatBitmask(layer.role)}</span>
+                </div>
+                <div class="debug-row">
+                    <span class="debug-label">Tile ID:</span>
+                    <span class="debug-value">${layer.tileId ?? 'N/A'}</span>
+                </div>
+                <div class="debug-row">
+                    <span class="debug-label">Status:</span>
+                    <span class="debug-value" style="color: ${layer.drawn ? '#66dd66' : '#ff8866'}">${layer.reason}</span>
+                </div>
+            </div>
+        `).join('')}
+    `;
+
+    debugContent.innerHTML = html;
+}
