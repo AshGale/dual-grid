@@ -48,14 +48,31 @@
             margin-left: 10px;
         }
         button:hover { background: #70baff; }
+        button.active {
+            background: #2a8fdf;
+            box-shadow: inset 0 2px 4px rgba(0,0,0,0.3);
+        }
+        button.mode-btn {
+            background: #555;
+        }
+        button.mode-btn:hover {
+            background: #666;
+        }
+        button.mode-btn.active {
+            background: #2a8fdf;
+            box-shadow: inset 0 2px 4px rgba(0,0,0,0.3);
+        }
     </style>
 </head>
 <body>
 
     <div class="controls">
-        <span style="color:#aaa">Map Generation:</span>
+        <span style="color:#aaa">View Mode:</span>
+        <button id="btnTextured" class="mode-btn">Isometric Textured</button>
+        <button id="btnColored" class="mode-btn">Isometric Colored</button>
+        <button id="btnOrtho" class="mode-btn">Orthographic</button>
+        <span style="color:#aaa; margin-left: 20px;">Map:</span>
         <button id="btnRegenerate">New Random Map</button>
-        <button id="btnToggleIso">Toggle Isometric</button>
         <span style="color:#888; margin-left: 20px;">Drag to pan the map</span>
     </div>
 

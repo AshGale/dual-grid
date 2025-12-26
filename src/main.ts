@@ -319,21 +319,47 @@ document.getElementById('btnRegenerate')!.addEventListener('click', () => {
     grid.generatePerlinMap();
 });
 
-const btnToggleIso = document.getElementById('btnToggleIso')!;
+// Mode buttons
+const btnTextured = document.getElementById('btnTextured')!;
+const btnColored = document.getElementById('btnColored')!;
+const btnOrtho = document.getElementById('btnOrtho')!;
 
-function updateButtonText() {
-    const modeNames = ['Isometric Textured', 'Isometric Colored', 'Orthographic Colored'];
-    btnToggleIso.textContent = modeNames[grid.renderMode];
+function updateActiveButton() {
+    // Remove active class from all mode buttons
+    btnTextured.classList.remove('active');
+    btnColored.classList.remove('active');
+    btnOrtho.classList.remove('active');
+
+    // Add active class to current mode button
+    if (grid.renderMode === RenderMode.IsometricTextured) {
+        btnTextured.classList.add('active');
+    } else if (grid.renderMode === RenderMode.IsometricColored) {
+        btnColored.classList.add('active');
+    } else {
+        btnOrtho.classList.add('active');
+    }
 }
 
-btnToggleIso.addEventListener('click', () => {
-    console.log("Cycling render mode...");
-    grid.renderMode = (grid.renderMode + 1) % 3;
-    updateButtonText();
+btnTextured.addEventListener('click', () => {
+    console.log("Switching to Isometric Textured mode...");
+    grid.renderMode = RenderMode.IsometricTextured;
+    updateActiveButton();
 });
 
-// Set initial button text
-updateButtonText();
+btnColored.addEventListener('click', () => {
+    console.log("Switching to Isometric Colored mode...");
+    grid.renderMode = RenderMode.IsometricColored;
+    updateActiveButton();
+});
+
+btnOrtho.addEventListener('click', () => {
+    console.log("Switching to Orthographic mode...");
+    grid.renderMode = RenderMode.OrthographicColored;
+    updateActiveButton();
+});
+
+// Set initial active button
+updateActiveButton();
 
 // Handle resize
 window.addEventListener('resize', () => {
