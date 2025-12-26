@@ -67,12 +67,70 @@
         declare const SimplexNoise: any;
         const simplex = new SimplexNoise();
 
+        // --- TEXTURE LOADING ---
+        interface WangTileMember {
+            id: number;
+            role: number;
+        }
+
+        interface WangTileData {
+            tile_width: number;
+            tile_height: number;
+            wang_sets: Array<{ members: WangTileMember[] }>;
+        }
+
+        interface TerrainAssets {
+            image: HTMLImageElement;
+            wangData: WangTileData;
+            roleToId: Map<number, number>;
+        }
+
+        const terrainAssets: Map<TerrainType, TerrainAssets> = new Map();
+        let assetsLoaded = false;
+
         // --- TYPES ---
         enum TerrainType {
             Water = 0,
             Sand = 1,
             Dirt = 2,
             Grass = 3
+        }
+
+        // --- ASSET LOADING FUNCTIONS ---
+        async function loadTerrainAssets(): Promise<void> {
+            const terrainNames = ['water', 'sand', 'dirt', 'grass'];
+            const promises = terrainNames.map(async (name, index) => {
+                // Load image
+                const img = new Image();
+                const imgPromise = new Promise<void>((resolve, reject) => {
+                    img.onload = () => resolve();
+                    img.onerror = reject;
+                    img.src = `${name}/${name}.png`;
+                });
+
+                // Load wang data
+                const response = await fetch(`${name}/${name}.txt`);
+                const wangData: WangTileData = await response.json();
+
+                await imgPromise;
+
+                // Build role-to-id lookup map
+                const roleToId = new Map<number, number>();
+                if (wangData.wang_sets && wangData.wang_sets[0]) {
+                    wangData.wang_sets[0].members.forEach(member => {
+                        roleToId.set(member.role, member.id);
+                    });
+                }
+
+                terrainAssets.set(index as TerrainType, {
+                    image: img,
+                    wangData,
+                    roleToId
+                });
+            });
+
+            await Promise.all(promises);
+            assetsLoaded = true;
         }
 
         // --- DUAL GRID SYSTEM ---
@@ -121,121 +179,120 @@
             }
 
             public render(ctx: CanvasRenderingContext2D, canvasWidth: number, canvasHeight: number) {
+                if (!assetsLoaded) return; // Wait for assets to load
+
                 // Center the isometric map in the canvas
                 const originX = canvasWidth / 2;
                 const originY = 100; // Vertical padding
 
-                for (let y = 0; y < this.height - 1; y++) {
-                    for (let x = 0; x < this.width - 1; x++) {
-                        
-                        // 1. Get Neighbors (Dual Grid Logic)
-                        const tl = this.getCell(x, y);
-                        const tr = this.getCell(x + 1, y);
-                        const bl = this.getCell(x, y + 1);
-                        const br = this.getCell(x + 1, y + 1);
+                // Draw in layers: Water -> Sand -> Dirt -> Grass
+                // This ensures proper visual stacking
+                const layerOrder = [TerrainType.Water, TerrainType.Sand, TerrainType.Dirt, TerrainType.Grass];
 
-                        // 2. Calculate Position
-                        let drawX, drawY;
+                for (const terrainLayer of layerOrder) {
+                    for (let y = 0; y < this.height - 1; y++) {
+                        for (let x = 0; x < this.width - 1; x++) {
 
-                        if (this.isIsometric) {
-                            // Isometric Projection Formula
-                            // x * 0.5 * width  +  y * -0.5 * width
-                            drawX = originX + (x - y) * (TILE_WIDTH / 2);
-                            drawY = originY + (x + y) * (TILE_HEIGHT / 2);
-                        } else {
-                            // Standard Top-Down
-                            drawX = x * 40; // 40px square size for top-down debug
-                            drawY = y * 40;
+                            // 1. Get Neighbors (Dual Grid Logic)
+                            const tl = this.getCell(x, y);
+                            const tr = this.getCell(x + 1, y);
+                            const bl = this.getCell(x, y + 1);
+                            const br = this.getCell(x + 1, y + 1);
+
+                            // Skip if none of the corners match this layer
+                            if (tl !== terrainLayer && tr !== terrainLayer &&
+                                bl !== terrainLayer && br !== terrainLayer) {
+                                continue;
+                            }
+
+                            // 2. Calculate Position
+                            let drawX, drawY;
+
+                            if (this.isIsometric) {
+                                // Isometric Projection Formula
+                                // x * 0.5 * width  +  y * -0.5 * width
+                                drawX = originX + (x - y) * (TILE_WIDTH / 2);
+                                drawY = originY + (x + y) * (TILE_HEIGHT / 2);
+                            } else {
+                                // Standard Top-Down
+                                drawX = x * 40; // 40px square size for top-down debug
+                                drawY = y * 40;
+                            }
+
+                            // 3. Draw Tile (Sprite or Procedural)
+                            this.drawTile(ctx, drawX, drawY, tl, tr, bl, br, terrainLayer);
                         }
-
-                        // 3. Draw Tile (Procedural or Sprite)
-                        this.drawTile(ctx, drawX, drawY, tl, tr, bl, br);
                     }
                 }
             }
 
             private drawTile(
-                ctx: CanvasRenderingContext2D, 
-                x: number, y: number, 
-                tl: TerrainType, tr: TerrainType, bl: TerrainType, br: TerrainType
+                ctx: CanvasRenderingContext2D,
+                x: number, y: number,
+                tl: TerrainType, tr: TerrainType, bl: TerrainType, br: TerrainType,
+                terrainLayer: TerrainType
             ) {
-                // Debug Colors
-                const colors = {
-                    [TerrainType.Water]: '#225588',
-                    [TerrainType.Sand]:  '#eebb44',
-                    [TerrainType.Dirt]:  '#885533',
-                    [TerrainType.Grass]: '#44aa44'
-                };
-
                 if (this.isIsometric) {
-                    // Draw a Diamond Shape split into 4 logical quadrants
-                    // In a real game, you would just draw: ctx.drawImage(atlas[id], x - offset, y - offset)
-                    
-                    ctx.save();
-                    ctx.translate(x, y);
-                    
-                    // Draw the diamond shape path
-                    // Top Quadrant (TL)
-                    this.drawIsoQuad(ctx, colors[tl], 0, -TILE_HEIGHT/2);
-                    // Right Quadrant (TR)
-                    this.drawIsoQuad(ctx, colors[tr], TILE_WIDTH/2, 0);
-                    // Bottom Quadrant (BR)
-                    this.drawIsoQuad(ctx, colors[br], 0, TILE_HEIGHT/2);
-                    // Left Quadrant (BL)
-                    this.drawIsoQuad(ctx, colors[bl], -TILE_WIDTH/2, 0);
+                    // Calculate Wang tile role based on which corners match this terrain layer
+                    // Wang tile bitmask: TL=1, TR=2, BL=4, BR=8
+                    let role = 0;
+                    if (tl === terrainLayer) role |= 1;
+                    if (tr === terrainLayer) role |= 2;
+                    if (bl === terrainLayer) role |= 4;
+                    if (br === terrainLayer) role |= 8;
 
-                    // Grid outline
-                    ctx.beginPath();
-                    ctx.moveTo(0, -TILE_HEIGHT);    // Top
-                    ctx.lineTo(TILE_WIDTH, 0);      // Right
-                    ctx.lineTo(0, TILE_HEIGHT);     // Bottom
-                    ctx.lineTo(-TILE_WIDTH, 0);     // Left
-                    ctx.closePath();
-                    ctx.strokeStyle = "rgba(0,0,0,0.1)";
-                    ctx.stroke();
-                    
-                    ctx.restore();
+                    // Skip if role is 0 (no corners match)
+                    if (role === 0) return;
+
+                    const assets = terrainAssets.get(terrainLayer);
+                    if (!assets) return;
+
+                    // Get the tile ID from the wang data
+                    const tileId = assets.roleToId.get(role);
+                    if (tileId === undefined) return;
+
+                    // Draw the sprite from the atlas
+                    // Tiles are arranged horizontally in the sprite sheet
+                    const srcX = tileId * TILE_WIDTH;
+                    const srcY = 0;
+
+                    // Center the tile on the draw position
+                    ctx.drawImage(
+                        assets.image,
+                        srcX, srcY, TILE_WIDTH, TILE_HEIGHT,
+                        x - TILE_WIDTH / 2, y - TILE_HEIGHT / 2,
+                        TILE_WIDTH, TILE_HEIGHT
+                    );
 
                 } else {
-                    // Standard Square Debug Drawing
+                    // Standard Square Debug Drawing (fallback for top-down mode)
+                    const colors = {
+                        [TerrainType.Water]: '#225588',
+                        [TerrainType.Sand]:  '#eebb44',
+                        [TerrainType.Dirt]:  '#885533',
+                        [TerrainType.Grass]: '#44aa44'
+                    };
+
                     const size = 40;
                     const half = size / 2;
-                    
-                    ctx.fillStyle = colors[tl]; ctx.fillRect(x, y, half, half);
-                    ctx.fillStyle = colors[tr]; ctx.fillRect(x + half, y, half, half);
-                    ctx.fillStyle = colors[bl]; ctx.fillRect(x, y + half, half, half);
-                    ctx.fillStyle = colors[br]; ctx.fillRect(x + half, y + half, half, half);
-                    ctx.strokeStyle = "rgba(0,0,0,0.2)";
-                    ctx.strokeRect(x, y, size, size);
-                }
-            }
 
-            // Helper to draw a small diamond quadrant for procedural debug
-            private drawIsoQuad(ctx: CanvasRenderingContext2D, color: string, offsetX: number, offsetY: number) {
-                ctx.fillStyle = color;
-                ctx.beginPath();
-                ctx.moveTo(0, 0); // Center of tile
-                
-                // This math simply fills 1/4th of the diamond based on which corner we are drawing
-                // It's purely for debug visualization purposes.
-                if(offsetY < 0) { // Top
-                     ctx.lineTo(TILE_WIDTH/2, -TILE_HEIGHT/2); 
-                     ctx.lineTo(0, -TILE_HEIGHT); 
-                     ctx.lineTo(-TILE_WIDTH/2, -TILE_HEIGHT/2);
-                } else if(offsetX > 0) { // Right
-                     ctx.lineTo(TILE_WIDTH/2, -TILE_HEIGHT/2); 
-                     ctx.lineTo(TILE_WIDTH, 0); 
-                     ctx.lineTo(TILE_WIDTH/2, TILE_HEIGHT/2);
-                } else if(offsetY > 0) { // Bottom
-                     ctx.lineTo(TILE_WIDTH/2, TILE_HEIGHT/2); 
-                     ctx.lineTo(0, TILE_HEIGHT); 
-                     ctx.lineTo(-TILE_WIDTH/2, TILE_HEIGHT/2);
-                } else { // Left
-                     ctx.lineTo(-TILE_WIDTH/2, -TILE_HEIGHT/2); 
-                     ctx.lineTo(-TILE_WIDTH, 0); 
-                     ctx.lineTo(-TILE_WIDTH/2, TILE_HEIGHT/2);
+                    if (tl === terrainLayer) {
+                        ctx.fillStyle = colors[tl];
+                        ctx.fillRect(x, y, half, half);
+                    }
+                    if (tr === terrainLayer) {
+                        ctx.fillStyle = colors[tr];
+                        ctx.fillRect(x + half, y, half, half);
+                    }
+                    if (bl === terrainLayer) {
+                        ctx.fillStyle = colors[bl];
+                        ctx.fillRect(x, y + half, half, half);
+                    }
+                    if (br === terrainLayer) {
+                        ctx.fillStyle = colors[br];
+                        ctx.fillRect(x + half, y + half, half, half);
+                    }
                 }
-                ctx.fill();
             }
         }
 
@@ -257,9 +314,26 @@
             ctx.fillStyle = "#0d0d0d";
             ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-            grid.render(ctx, canvas.width, canvas.height);
+            if (assetsLoaded) {
+                grid.render(ctx, canvas.width, canvas.height);
+            } else {
+                // Show loading message
+                ctx.fillStyle = "#eee";
+                ctx.font = "20px 'Segoe UI'";
+                ctx.textAlign = "center";
+                ctx.fillText("Loading textures...", canvas.width / 2, canvas.height / 2);
+            }
+
             requestAnimationFrame(loop);
         }
+
+        // Start loading assets and begin render loop
+        loadTerrainAssets().then(() => {
+            console.log("All terrain assets loaded!");
+        }).catch(err => {
+            console.error("Failed to load assets:", err);
+        });
+
         loop();
 
         // --- EXPOSED FUNCTIONS FOR UI ---
