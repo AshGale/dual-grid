@@ -152,27 +152,26 @@ class DualGridSystem {
         // Pass 2: Transition layer - draw edge/corner tiles (role != 15)
 
         // PASS 1: BASE FULL TILES
-        // Draw in terrain order: Water -> Sand -> Dirt -> Grass
+        // For base layer, we need to ensure EVERY tile has a background
+        // Strategy: Draw the lowest terrain type from the 4 corners as the base
         const layerOrder = [TerrainType.Water, TerrainType.Sand, TerrainType.Dirt, TerrainType.Grass];
 
         if (this.showBaseLayer) {
-            for (const terrainLayer of layerOrder) {
-                for (let y = 0; y < this.height - 1; y++) {
-                    for (let x = 0; x < this.width - 1; x++) {
-                        // Get the 4 corner cells
-                        const tl = this.getCell(x, y);
-                        const tr = this.getCell(x + 1, y);
-                        const bl = this.getCell(x, y + 1);
-                        const br = this.getCell(x + 1, y + 1);
+            for (let y = 0; y < this.height - 1; y++) {
+                for (let x = 0; x < this.width - 1; x++) {
+                    // Get the 4 corner cells
+                    const tl = this.getCell(x, y);
+                    const tr = this.getCell(x + 1, y);
+                    const bl = this.getCell(x, y + 1);
+                    const br = this.getCell(x + 1, y + 1);
 
-                        // Only draw if ALL 4 corners match this terrain (full tile)
-                        if (tl === terrainLayer && tr === terrainLayer &&
-                            bl === terrainLayer && br === terrainLayer) {
+                    // Find the lowest terrain type among the 4 corners
+                    // (Water=0 is lowest, Grass=3 is highest)
+                    const minTerrain = Math.min(tl, tr, bl, br);
 
-                            const { drawX, drawY } = this.calculateTilePosition(x, y, originX, originY);
-                            this.drawTile(ctx, drawX, drawY, tl, tr, bl, br, terrainLayer);
-                        }
-                    }
+                    // Draw a full tile of the lowest terrain type as the base
+                    const { drawX, drawY } = this.calculateTilePosition(x, y, originX, originY);
+                    this.drawTile(ctx, drawX, drawY, minTerrain, minTerrain, minTerrain, minTerrain, minTerrain);
                 }
             }
         }
