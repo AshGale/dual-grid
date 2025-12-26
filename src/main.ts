@@ -91,6 +91,8 @@ class DualGridSystem {
     public height: number;
     public cells: TerrainType[];
     public isIsometric: boolean = true;
+    public cameraOffsetX: number = 0;
+    public cameraOffsetY: number = 0;
 
     constructor(width: number, height: number) {
         this.width = width;
@@ -133,9 +135,9 @@ class DualGridSystem {
     public render(ctx: CanvasRenderingContext2D, canvasWidth: number, canvasHeight: number) {
         if (!assetsLoaded) return; // Wait for assets to load
 
-        // Center the isometric map in the canvas
-        const originX = canvasWidth / 2;
-        const originY = 100; // Vertical padding
+        // Center the isometric map in the canvas with camera offset
+        const originX = canvasWidth / 2 + this.cameraOffsetX;
+        const originY = canvasHeight / 2 + this.cameraOffsetY;
 
         // Draw in layers: Water -> Sand -> Dirt -> Grass
         // This ensures proper visual stacking
@@ -253,9 +255,13 @@ class DualGridSystem {
 const canvas = document.getElementById('gridCanvas') as HTMLCanvasElement;
 const ctx = canvas.getContext('2d')!;
 
-// Fullscreen Canvas
-canvas.width = window.innerWidth;
-canvas.height = window.innerHeight;
+// Size canvas to fill available space (window height minus controls)
+function resizeCanvas() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+}
+
+resizeCanvas();
 
 const grid = new DualGridSystem(GRID_SIZE, GRID_SIZE);
 grid.generatePerlinMap();
@@ -302,6 +308,37 @@ document.getElementById('btnToggleIso')!.addEventListener('click', () => {
 
 // Handle resize
 window.addEventListener('resize', () => {
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
+    resizeCanvas();
+});
+
+// --- CAMERA PANNING ---
+let isDragging = false;
+let lastMouseX = 0;
+let lastMouseY = 0;
+
+canvas.addEventListener('mousedown', (e) => {
+    isDragging = true;
+    lastMouseX = e.clientX;
+    lastMouseY = e.clientY;
+});
+
+canvas.addEventListener('mousemove', (e) => {
+    if (!isDragging) return;
+
+    const deltaX = e.clientX - lastMouseX;
+    const deltaY = e.clientY - lastMouseY;
+
+    grid.cameraOffsetX += deltaX;
+    grid.cameraOffsetY += deltaY;
+
+    lastMouseX = e.clientX;
+    lastMouseY = e.clientY;
+});
+
+canvas.addEventListener('mouseup', () => {
+    isDragging = false;
+});
+
+canvas.addEventListener('mouseleave', () => {
+    isDragging = false;
 });
