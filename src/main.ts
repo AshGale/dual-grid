@@ -802,12 +802,24 @@ function formatBitmask(role: number): string {
 }
 
 function displayDebugInfo(info: TileDebugInfo) {
+    // Count unique terrain types
+    const uniqueTerrains = new Set([
+        info.corners.tl,
+        info.corners.tr,
+        info.corners.bl,
+        info.corners.br
+    ]).size;
+
     const html = `
         <div class="debug-section">
             <h4>Tile Position</h4>
             <div class="debug-row">
                 <span class="debug-label">Grid Coordinates:</span>
                 <span class="debug-value">(${info.gridX}, ${info.gridY})</span>
+            </div>
+            <div class="debug-row">
+                <span class="debug-label">Unique Terrains:</span>
+                <span class="debug-value" style="color: ${uniqueTerrains > 3 ? '#ff8866' : uniqueTerrains > 2 ? '#ffbb44' : '#66dd66'}">${uniqueTerrains} ${uniqueTerrains > 3 ? '⚠️ Complex!' : ''}</span>
             </div>
         </div>
 
