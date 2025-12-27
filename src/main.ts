@@ -46,10 +46,10 @@ interface TileDebugInfo {
     gridX: number;
     gridY: number;
     corners: {
-        tl: TerrainType;
-        tr: TerrainType;
-        bl: TerrainType;
-        br: TerrainType;
+        tl: TerrainType;  // Top visual corner (North)
+        tr: TerrainType;  // Right visual corner (East)
+        bl: TerrainType;  // Bottom visual corner (South)
+        br: TerrainType;  // Left visual corner (West)
     };
     baseLayer: {
         terrain: TerrainType;
@@ -193,13 +193,16 @@ class DualGridSystem {
         // Calculate transition layers
         const layerOrder = [TerrainType.Sand, TerrainType.Dirt, TerrainType.Grass];
         for (const currentLayer of layerOrder) {
-            // Binary weights using industry-standard Wang tiling (clockwise from TL):
-            // TL (Top-Left/NW) = 1, TR (Top-Right/NE) = 2, BL (Bottom-Left/SW) = 4, BR (Bottom-Right/SE) = 8
+            // Wang tile bitmask - each bit represents a visual corner:
+            // Bit 1 = Top visual corner (tl)
+            // Bit 2 = Right visual corner (tr)
+            // Bit 4 = Bottom visual corner (bl)
+            // Bit 8 = Left visual corner (br)
             let role = 0;
-            if (tl >= currentLayer) role |= 1;  // TL (Top-Left) = bit 1
-            if (tr >= currentLayer) role |= 2;  // TR (Top-Right) = bit 2
-            if (bl >= currentLayer) role |= 4;  // BL (Bottom-Left) = bit 4
-            if (br >= currentLayer) role |= 8;  // BR (Bottom-Right) = bit 8
+            if (tl >= currentLayer) role |= 1;  // Top corner
+            if (tr >= currentLayer) role |= 2;  // Right corner
+            if (bl >= currentLayer) role |= 4;  // Bottom corner
+            if (br >= currentLayer) role |= 8;  // Left corner
 
             let drawn = false;
             let reason = '';
@@ -302,16 +305,17 @@ class DualGridSystem {
                         const bl = this.getCell(x + 1, y + 1);  // Bottom corner (South)
                         const br = this.getCell(x, y + 1);      // Left corner (West)
 
-                        // Calculate bitmask using >= comparison
-                        // Any terrain at or above current layer priority is treated as 1
-                        // Any terrain below current layer is treated as 0
-                        // Binary weights using industry-standard Wang tiling (clockwise from TL):
-                        // TL (Top) = 1, TR (Right) = 2, BL (Bottom) = 4, BR (Left) = 8
+                        // Calculate Wang tile bitmask for this layer
+                        // Each bit represents whether a visual corner has terrain >= currentLayer
+                        // Bit 1 = Top visual corner (tl)
+                        // Bit 2 = Right visual corner (tr)
+                        // Bit 4 = Bottom visual corner (bl)
+                        // Bit 8 = Left visual corner (br)
                         let role = 0;
-                        if (tl >= currentLayer) role |= 1;  // TL (Top) = bit 1
-                        if (tr >= currentLayer) role |= 2;  // TR (Right) = bit 2
-                        if (bl >= currentLayer) role |= 4;  // BL (Bottom) = bit 4
-                        if (br >= currentLayer) role |= 8;  // BR (Left) = bit 8
+                        if (tl >= currentLayer) role |= 1;  // Top corner
+                        if (tr >= currentLayer) role |= 2;  // Right corner
+                        if (bl >= currentLayer) role |= 4;  // Bottom corner
+                        if (br >= currentLayer) role |= 8;  // Left corner
 
                         // Skip if role is 0 (no corners) or 15 (full tile, already in base layer)
                         if (role === 0 || role === 15) continue;
@@ -553,16 +557,20 @@ class DualGridSystem {
 
             ctx.fillStyle = colors[terrainLayer];
 
-            if (role & 1) {  // TL
+            // Bit 1 = Top visual corner -> top-left quadrant
+            if (role & 1) {
                 ctx.fillRect(x, y, half, half);
             }
-            if (role & 2) {  // TR
+            // Bit 2 = Right visual corner -> top-right quadrant
+            if (role & 2) {
                 ctx.fillRect(x + half, y, half, half);
             }
-            if (role & 4) {  // BL
+            // Bit 4 = Bottom visual corner -> bottom-left quadrant
+            if (role & 4) {
                 ctx.fillRect(x, y + half, half, half);
             }
-            if (role & 8) {  // BR
+            // Bit 8 = Left visual corner -> bottom-right quadrant
+            if (role & 8) {
                 ctx.fillRect(x + half, y + half, half, half);
             }
         }
@@ -806,11 +814,14 @@ function getTerrainClass(terrain: TerrainType): string {
 }
 
 function formatBitmask(role: number): string {
+    // Display format maps bits to traditional grid corner labels (TL/TR/BL/BR)
+    // Note: Visual corners (Top/Right/Bottom/Left) map to traditional labels as:
+    // Top visual -> TR label, Right visual -> BR label, Bottom visual -> BL label, Left visual -> TL label
     const bits = [
-        role & 1 ? 'TR' : '--',  // bit 1 = Top-Right visual corner
-        role & 2 ? 'BR' : '--',  // bit 2 = Bottom-Right visual corner
-        role & 4 ? 'BL' : '--',  // bit 4 = Bottom-Left visual corner
-        role & 8 ? 'TL' : '--'   // bit 8 = Top-Left visual corner
+        role & 1 ? 'TR' : '--',  // bit 1 = Top visual corner -> "TR" label
+        role & 2 ? 'BR' : '--',  // bit 2 = Right visual corner -> "BR" label
+        role & 4 ? 'BL' : '--',  // bit 4 = Bottom visual corner -> "BL" label
+        role & 8 ? 'TL' : '--'   // bit 8 = Left visual corner -> "TL" label
     ];
     return `${bits.join(' ')} (${role})`;
 }

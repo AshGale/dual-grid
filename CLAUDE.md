@@ -13,9 +13,31 @@ This is a single-file isometric terrain renderer that demonstrates dual-grid til
 The core concept is a **dual grid** approach where each rendered tile is determined by the terrain types of its four corner cells:
 
 - **Data Grid**: A 30x30 array of terrain type values (Water, Sand, Dirt, Grass)
-- **Render Grid**: Each rendered tile samples 4 neighboring cells (TL, TR, BL, BR) to determine which tile variant to draw
+- **Render Grid**: Each rendered tile samples 4 neighboring cells to determine which tile variant to draw
 
 This creates smooth terrain transitions where tiles automatically blend based on their neighbors, similar to Wang tiling or blob tiling systems.
+
+#### Critical: Isometric Corner Mapping
+
+**IMPORTANT**: In isometric view, the visual corners map to grid positions differently than in orthographic view. For a dual-grid tile at position `(x, y)`:
+
+**Visual Corner → Grid Position Mapping:**
+- **Top (North)** → grid position `(x, y)`
+- **Right (East)** → grid position `(x+1, y)`
+- **Bottom (South)** → grid position `(x+1, y+1)`
+- **Left (West)** → grid position `(x, y+1)`
+
+This mapping MUST be used consistently across:
+- Base layer rendering ([src/main.ts:265-276](src/main.ts))
+- Transition layer rendering ([src/main.ts:293-303](src/main.ts))
+- Debug info generation ([src/main.ts:170-173](src/main.ts))
+- Debug visualization dots ([src/main.ts:442-446](src/main.ts))
+
+**Corner Variable Naming:**
+- `tl` = Top visual corner (North)
+- `tr` = Right visual corner (East)
+- `bl` = Bottom visual corner (South)
+- `br` = Left visual corner (West)
 
 ### Coordinate Systems
 
@@ -104,9 +126,75 @@ The main class is `DualGridSystem` which handles:
 - **New Random Map button**: Regenerate terrain with new Perlin noise
 - **Toggle Isometric button**: Switch between isometric and top-down view
 
-### Rendering
+### Rendering System
 
-The renderer uses actual sprite textures loaded from `/public/` with Wang tiling:
-- Each terrain type has 15 tile variants based on corner matching
-- Tiles are drawn in layers to ensure proper visual stacking
-- Wang tile role is calculated using bitmask: TL=1, TR=2, BL=4, BR=8
+The renderer uses a **two-pass rendering system** with Wang tiling for smooth terrain transitions:
+
+#### Pass 1: Base Layer
+- Draws the **lowest terrain type** from the 4 corners as a full tile (role 15) background
+- Example: If corners are Water, Water, Dirt, Dirt → draws Water as base
+- This ensures every tile has a solid background for transitions to layer on top
+
+#### Pass 2: Transition Layers
+- Draws partial tiles in priority order: Sand → Dirt → Grass
+- Each layer only draws where its terrain **actually exists** at the corners
+- Skips role 0 (no corners) and role 15 (full tiles, already in base layer)
+- This prevents phantom intermediate terrain from appearing
+
+#### Wang Tile Bitmask System
+
+**Corner-to-Bit Mapping:**
+- **Bit 1** = Top (tl) visual corner
+- **Bit 2** = Right (tr) visual corner
+- **Bit 4** = Bottom (bl) visual corner
+- **Bit 8** = Left (br) visual corner
+
+**Role Calculation:**
+```typescript
+let role = 0;
+if (tl >= currentLayer) role |= 1;  // Top
+if (tr >= currentLayer) role |= 2;  // Right
+if (bl >= currentLayer) role |= 4;  // Bottom
+if (br >= currentLayer) role |= 8;  // Left
+```
+
+**Display Format** (in `formatBitmask()`):
+- Bit 1 displays as "TR" (Top-Right in traditional grid naming)
+- Bit 2 displays as "BR" (Bottom-Right)
+- Bit 4 displays as "BL" (Bottom-Left)
+- Bit 8 displays as "TL" (Top-Left)
+
+Each terrain type has 15 tile variants (roles 1-15) based on corner matching, loaded from `/public/` sprite sheets.
+
+## Common Issues & Troubleshooting
+
+### Phantom Terrain Appearing
+
+**Symptom**: Sand appears between Water and Dirt transitions where no Sand corners exist.
+
+**Cause**: Incorrect corner mapping - the code is sampling the wrong grid positions for visual corners.
+
+**Solution**: Verify the corner mapping in all rendering passes matches:
+```typescript
+const tl = this.getCell(x, y);          // Top visual corner
+const tr = this.getCell(x + 1, y);      // Right visual corner
+const bl = this.getCell(x + 1, y + 1);  // Bottom visual corner
+const br = this.getCell(x, y + 1);      // Left visual corner
+```
+
+### Debug Panel Labels Don't Match Visual Corners
+
+**Symptom**: Debug panel shows "BL BR" but visually the top corners have the terrain.
+
+**Cause**: Incorrect bitmask display formatting in `formatBitmask()`.
+
+**Solution**: Ensure the formatBitmask function maps bits to labels correctly:
+- Bit 1 → "TR", Bit 2 → "BR", Bit 4 → "BL", Bit 8 → "TL"
+
+### Red Debug Dots Don't Match Corner Labels
+
+**Symptom**: Red dots appear at different corners than the labels indicate.
+
+**Cause**: Debug visualization using incorrect grid-to-corner mapping.
+
+**Solution**: Verify debug dots array at [src/main.ts:442-446](src/main.ts) uses correct mapping.
