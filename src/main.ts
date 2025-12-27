@@ -807,10 +807,10 @@ function getTerrainClass(terrain: TerrainType): string {
 
 function formatBitmask(role: number): string {
     const bits = [
-        role & 1 ? 'TL' : '--',
-        role & 2 ? 'TR' : '--',
-        role & 4 ? 'BL' : '--',
-        role & 8 ? 'BR' : '--'
+        role & 1 ? 'TR' : '--',  // bit 1 = Top-Right visual corner
+        role & 2 ? 'BR' : '--',  // bit 2 = Bottom-Right visual corner
+        role & 4 ? 'BL' : '--',  // bit 4 = Bottom-Left visual corner
+        role & 8 ? 'TL' : '--'   // bit 8 = Top-Left visual corner
     ];
     return `${bits.join(' ')} (${role})`;
 }
