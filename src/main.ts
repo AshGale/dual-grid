@@ -520,16 +520,44 @@ class DualGridSystem {
         if (this.renderMode === RenderMode.IsometricTextured) {
             // Textured Isometric Mode
             const assets = terrainAssets.get(terrainLayer);
-            if (!assets) return;
+            if (!assets) {
+                console.warn(`[RENDER] No assets found for terrain: ${TerrainType[terrainLayer]}`);
+                return;
+            }
 
             // Get the tile ID from the wang data
             const tileId = assets.roleToId.get(role);
-            if (tileId === undefined) return;
+            if (tileId === undefined) {
+                console.warn(`[RENDER] No tile ID mapping for ${TerrainType[terrainLayer]} role ${role}`);
+                return;
+            }
+
+            // Validate image is loaded
+            if (!assets.image.complete) {
+                console.warn(`[RENDER] Image not loaded for ${TerrainType[terrainLayer]}`);
+                return;
+            }
+            if (assets.image.naturalWidth === 0 || assets.image.naturalHeight === 0) {
+                console.warn(`[RENDER] Invalid image dimensions for ${TerrainType[terrainLayer]}: ${assets.image.naturalWidth}x${assets.image.naturalHeight}`);
+                return;
+            }
 
             // Draw the sprite from the atlas
-            // Tiles are arranged horizontally in the sprite sheet
-            const srcX = tileId * TILE_WIDTH;
-            const srcY = 0;
+            // Tiles are arranged in 2 rows: IDs 0-7 on row 0, IDs 8-14 on row 1
+            // Each row can hold 8 tiles (512px / 64px = 8)
+            const tilesPerRow = 8;
+            const row = Math.floor(tileId / tilesPerRow);
+            const col = tileId % tilesPerRow;
+            const srcX = col * TILE_WIDTH;
+            const srcY = row * TILE_HEIGHT;
+
+            // Validate sprite sheet has enough space for this tile
+            const requiredWidth = srcX + TILE_WIDTH;
+            const requiredHeight = srcY + TILE_HEIGHT;
+            if (assets.image.naturalWidth < requiredWidth || assets.image.naturalHeight < requiredHeight) {
+                console.warn(`[RENDER] Sprite sheet too small for ${TerrainType[terrainLayer]} tile ${tileId} (row ${row}, col ${col}): needs ${requiredWidth}x${requiredHeight}px, has ${assets.image.naturalWidth}x${assets.image.naturalHeight}px`);
+                return;
+            }
 
             // Center the tile on the draw position
             ctx.drawImage(
@@ -538,6 +566,9 @@ class DualGridSystem {
                 x - TILE_WIDTH / 2, y - TILE_HEIGHT / 2,
                 TILE_WIDTH, TILE_HEIGHT
             );
+
+            // Log successful draws (comment out once debugging is complete)
+            console.log(`[RENDER] Drew ${TerrainType[terrainLayer]} tile ${tileId} (role ${role}) at grid (${Math.round((x + y/2) / 32)}, ${Math.round((y - x/2) / 32)})`);
 
         } else if (this.renderMode === RenderMode.IsometricColored) {
             // Colored Isometric Mode - draw a diamond with solid color
