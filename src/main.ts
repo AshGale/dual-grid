@@ -160,10 +160,17 @@ class DualGridSystem {
             return null;
         }
 
-        const tl = this.getCell(x, y);
-        const tr = this.getCell(x + 1, y);
-        const bl = this.getCell(x, y + 1);
-        const br = this.getCell(x + 1, y + 1);
+        // In isometric view, the visual corners map to grid positions as:
+        // Visual TOP (North) = grid (x, y)
+        // Visual RIGHT (East) = grid (x+1, y)
+        // Visual BOTTOM (South) = grid (x+1, y+1)
+        // Visual LEFT (West) = grid (x, y+1)
+        //
+        // Standard naming: TL=top, TR=right, BL=bottom, BR=left (visual corners)
+        const tl = this.getCell(x, y);          // Top corner (North)
+        const tr = this.getCell(x + 1, y);      // Right corner (East)
+        const bl = this.getCell(x + 1, y + 1);  // Bottom corner (South)
+        const br = this.getCell(x, y + 1);      // Left corner (West)
 
         const debugInfo: TileDebugInfo = {
             gridX: x,
@@ -256,22 +263,19 @@ class DualGridSystem {
         // Pass 2: Transition layer - draw edge/corner tiles (role != 15)
 
         // PASS 1: BASE FULL TILES
-        // For base layer, we need to ensure EVERY tile has a background
-        // Strategy: Draw the lowest terrain type from the 4 corners as the base
+        // Draw the lowest terrain type from the 4 corners as a full tile background
+        // This provides a base for transition tiles to draw on top of
         if (this.showBaseLayer) {
             for (let y = 0; y < this.height - 1; y++) {
                 for (let x = 0; x < this.width - 1; x++) {
-                    // Get the 4 corner cells
-                    const tl = this.getCell(x, y);
-                    const tr = this.getCell(x + 1, y);
-                    const bl = this.getCell(x, y + 1);
-                    const br = this.getCell(x + 1, y + 1);
+                    // Map grid positions to visual isometric corners
+                    const tl = this.getCell(x, y);          // Top corner (North)
+                    const tr = this.getCell(x + 1, y);      // Right corner (East)
+                    const bl = this.getCell(x + 1, y + 1);  // Bottom corner (South)
+                    const br = this.getCell(x, y + 1);      // Left corner (West)
 
-                    // Find the lowest terrain type among the 4 corners
-                    // (Water=0 is lowest, Grass=3 is highest)
+                    // Draw the lowest terrain type as the base
                     const minTerrain = Math.min(tl, tr, bl, br);
-
-                    // Draw a full tile of the lowest terrain type as the base
                     const { drawX, drawY } = this.calculateTilePosition(x, y, originX, originY);
                     this.drawTileByRole(ctx, drawX, drawY, minTerrain, 15);
                 }
@@ -288,23 +292,28 @@ class DualGridSystem {
             for (const currentLayer of layerOrder) {
                 for (let y = 0; y < this.height - 1; y++) {
                     for (let x = 0; x < this.width - 1; x++) {
-                        const tl = this.getCell(x, y);
-                        const tr = this.getCell(x + 1, y);
-                        const bl = this.getCell(x, y + 1);
-                        const br = this.getCell(x + 1, y + 1);
+                        // Map grid positions to visual isometric corners
+                        // Visual TOP (North) = grid (x, y)
+                        // Visual RIGHT (East) = grid (x+1, y)
+                        // Visual BOTTOM (South) = grid (x+1, y+1)
+                        // Visual LEFT (West) = grid (x, y+1)
+                        const tl = this.getCell(x, y);          // Top corner (North)
+                        const tr = this.getCell(x + 1, y);      // Right corner (East)
+                        const bl = this.getCell(x + 1, y + 1);  // Bottom corner (South)
+                        const br = this.getCell(x, y + 1);      // Left corner (West)
 
                         // Calculate bitmask using >= comparison
                         // Any terrain at or above current layer priority is treated as 1
                         // Any terrain below current layer is treated as 0
                         // Binary weights using industry-standard Wang tiling (clockwise from TL):
-                        // TL (Top-Left/NW) = 1, TR (Top-Right/NE) = 2, BL (Bottom-Left/SW) = 4, BR (Bottom-Right/SE) = 8
+                        // TL (Top) = 1, TR (Right) = 2, BL (Bottom) = 4, BR (Left) = 8
                         let role = 0;
-                        if (tl >= currentLayer) role |= 1;  // TL (Top-Left) = bit 1
-                        if (tr >= currentLayer) role |= 2;  // TR (Top-Right) = bit 2
-                        if (bl >= currentLayer) role |= 4;  // BL (Bottom-Left) = bit 4
-                        if (br >= currentLayer) role |= 8;  // BR (Bottom-Right) = bit 8
+                        if (tl >= currentLayer) role |= 1;  // TL (Top) = bit 1
+                        if (tr >= currentLayer) role |= 2;  // TR (Right) = bit 2
+                        if (bl >= currentLayer) role |= 4;  // BL (Bottom) = bit 4
+                        if (br >= currentLayer) role |= 8;  // BR (Left) = bit 8
 
-                        // Skip if role is 0 (no corners at this priority) or 15 (full tile, already in base)
+                        // Skip if role is 0 (no corners) or 15 (full tile, already in base layer)
                         if (role === 0 || role === 15) continue;
 
                         const { drawX, drawY } = this.calculateTilePosition(x, y, originX, originY);
@@ -428,11 +437,12 @@ class DualGridSystem {
                 ctx.strokeRect(originX + x * 40, originY + y * 40, 40, 40);
             } else {
                 // Draw corner dots in isometric mode
+                // Visual corners map to grid positions:
                 const corners = [
-                    { cx: x, cy: y },           // TL
-                    { cx: x + 1, cy: y },       // TR
-                    { cx: x, cy: y + 1 },       // BL
-                    { cx: x + 1, cy: y + 1 }    // BR
+                    { cx: x, cy: y },           // TL = Top (North)
+                    { cx: x + 1, cy: y },       // TR = Right (East)
+                    { cx: x + 1, cy: y + 1 },   // BL = Bottom (South)
+                    { cx: x, cy: y + 1 }        // BR = Left (West)
                 ];
 
                 corners.forEach(corner => {
@@ -830,19 +840,19 @@ function displayDebugInfo(info: TileDebugInfo) {
         <div class="debug-section">
             <h4>Corner Terrain Types</h4>
             <div class="debug-row">
-                <span class="debug-label">Top-Left:</span>
+                <span class="debug-label">Top (North):</span>
                 <span class="debug-value ${getTerrainClass(info.corners.tl)}">${getTerrainName(info.corners.tl)}</span>
             </div>
             <div class="debug-row">
-                <span class="debug-label">Top-Right:</span>
+                <span class="debug-label">Right (East):</span>
                 <span class="debug-value ${getTerrainClass(info.corners.tr)}">${getTerrainName(info.corners.tr)}</span>
             </div>
             <div class="debug-row">
-                <span class="debug-label">Bottom-Left:</span>
+                <span class="debug-label">Bottom (South):</span>
                 <span class="debug-value ${getTerrainClass(info.corners.bl)}">${getTerrainName(info.corners.bl)}</span>
             </div>
             <div class="debug-row">
-                <span class="debug-label">Bottom-Right:</span>
+                <span class="debug-label">Left (West):</span>
                 <span class="debug-value ${getTerrainClass(info.corners.br)}">${getTerrainName(info.corners.br)}</span>
             </div>
         </div>
