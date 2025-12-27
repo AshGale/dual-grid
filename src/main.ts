@@ -186,12 +186,13 @@ class DualGridSystem {
         // Calculate transition layers
         const layerOrder = [TerrainType.Sand, TerrainType.Dirt, TerrainType.Grass];
         for (const currentLayer of layerOrder) {
-            // Map grid corners to isometric visual positions
+            // Binary weights using industry-standard Wang tiling (clockwise from TL):
+            // TL (Top-Left/NW) = 1, TR (Top-Right/NE) = 2, BL (Bottom-Left/SW) = 4, BR (Bottom-Right/SE) = 8
             let role = 0;
-            if (tl >= currentLayer) role |= 1;  // TL (North in isometric view)
-            if (tr >= currentLayer) role |= 8;  // TR (East in isometric view)
-            if (bl >= currentLayer) role |= 2;  // BL (West in isometric view)
-            if (br >= currentLayer) role |= 4;  // BR (South in isometric view)
+            if (tl >= currentLayer) role |= 1;  // TL (Top-Left) = bit 1
+            if (tr >= currentLayer) role |= 2;  // TR (Top-Right) = bit 2
+            if (bl >= currentLayer) role |= 4;  // BL (Bottom-Left) = bit 4
+            if (br >= currentLayer) role |= 8;  // BR (Bottom-Right) = bit 8
 
             let drawn = false;
             let reason = '';
@@ -295,16 +296,13 @@ class DualGridSystem {
                         // Calculate bitmask using >= comparison
                         // Any terrain at or above current layer priority is treated as 1
                         // Any terrain below current layer is treated as 0
-                        // Map grid corners to isometric visual positions:
-                        // TL (grid) = North (visual) = bit 1
-                        // TR (grid) = East (visual) = bit 8
-                        // BL (grid) = West (visual) = bit 2
-                        // BR (grid) = South (visual) = bit 4
+                        // Binary weights using industry-standard Wang tiling (clockwise from TL):
+                        // TL (Top-Left/NW) = 1, TR (Top-Right/NE) = 2, BL (Bottom-Left/SW) = 4, BR (Bottom-Right/SE) = 8
                         let role = 0;
-                        if (tl >= currentLayer) role |= 1;  // TL (North in isometric view)
-                        if (tr >= currentLayer) role |= 8;  // TR (East in isometric view)
-                        if (bl >= currentLayer) role |= 2;  // BL (West in isometric view)
-                        if (br >= currentLayer) role |= 4;  // BR (South in isometric view)
+                        if (tl >= currentLayer) role |= 1;  // TL (Top-Left) = bit 1
+                        if (tr >= currentLayer) role |= 2;  // TR (Top-Right) = bit 2
+                        if (bl >= currentLayer) role |= 4;  // BL (Bottom-Left) = bit 4
+                        if (br >= currentLayer) role |= 8;  // BR (Bottom-Right) = bit 8
 
                         // Skip if role is 0 (no corners at this priority) or 15 (full tile, already in base)
                         if (role === 0 || role === 15) continue;
