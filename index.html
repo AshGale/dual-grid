@@ -211,7 +211,7 @@
             background: #4da6ff;
             padding: 10px;
         }
-        
+
         .minimap {
             position: fixed;
             bottom: 20px;
@@ -284,10 +284,18 @@
 
     <div class="config-panel" id="configPanel">
         <h3>Map Configuration</h3>
-        
+
+        <div class="config-section">
+            <h4>Live Preview</h4>
+            <div style="text-align: center; margin-bottom: 10px;">
+                <canvas id="minimapCanvas" style="border: 2px solid #4da6ff; border-radius: 4px; background: #0d0d0d;"></canvas>
+            </div>
+            <small style="color: #888; display: block; text-align: center;">Adjust settings below to see changes in real-time</small>
+        </div>
+
         <div class="config-section">
             <h4>Map Generation</h4>
-            
+
             <div class="config-input-group">
                 <label>Map Size (Width × Height)</label>
                 <input type="number" id="configMapSize" min="1" max="500" value="100">
@@ -306,7 +314,7 @@
                 <label style="font-size: 11px; margin-top: 5px;">Micro (0 - 0.01): <span class="range-value" id="scaleMicroValue">0.0000</span></label>
                 <input type="range" id="configScaleMicro" min="0" max="0.01" step="0.0001" value="0">
             </div>
-            
+
             <div class="config-input-group">
                 <label>Seed</label>
                 <div style="display: flex; gap: 5px;">
@@ -315,8 +323,8 @@
                 </div>
                 <small style="color: #888;">Leave empty or click 🎲 for random</small>
             </div>
-            
-            <button class="config-apply-btn" id="btnApplyConfig">Apply & Regenerate</button>
+
+            <button class="config-apply-btn" id="btnApplyConfig">Apply & Generate Full Map</button>
         </div>
     </div>
 
@@ -330,7 +338,7 @@
 
     <div class="minimap" id="minimap">
         <div class="minimap-label">World Map</div>
-        <canvas id="minimapCanvas"></canvas>
+        <canvas id="worldMinimapCanvas"></canvas>
     </div>
 
     <script type="module" src="/src/main.ts"></script>

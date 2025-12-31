@@ -955,11 +955,24 @@ resizeCanvas();
 
 const grid = new DualGridSystem(GRID_SIZE, GRID_SIZE);
 
-// Minimap setup
-const minimapCanvas = document.getElementById('minimapCanvas') as HTMLCanvasElement;
-const minimapCtx = minimapCanvas.getContext('2d')!;
-minimapCanvas.width = 250;
-minimapCanvas.height = 250;
+// Preview minimap setup (used in config panel for live preview)
+const previewMinimapCanvas = document.getElementById('minimapCanvas') as HTMLCanvasElement;
+const previewMinimapCtx = previewMinimapCanvas.getContext('2d')!;
+previewMinimapCanvas.width = 250;
+previewMinimapCanvas.height = 250;
+
+// World minimap setup (standalone minimap overlay showing actual map)
+const worldMinimapCanvas = document.getElementById('worldMinimapCanvas') as HTMLCanvasElement;
+const worldMinimapCtx = worldMinimapCanvas.getContext('2d')!;
+worldMinimapCanvas.width = 250;
+worldMinimapCanvas.height = 250;
+
+// Create a separate grid for live preview in config panel
+let previewGrid: DualGridSystem | null = null;
+
+// Get config panel and minimap references early for use in loop
+const configPanel = document.getElementById('configPanel')!;
+const minimap = document.getElementById('minimap')!;
 
 // --- LOOP ---
 function loop() {
@@ -969,11 +982,15 @@ function loop() {
 
     if (assetsLoaded) {
         grid.render(ctx, canvas.width, canvas.height);
-        
-        // Render minimap if open
-        const minimap = document.getElementById('minimap')!;
+
+        // Render preview minimap if config panel is open
+        if (configPanel.classList.contains('open') && previewGrid) {
+            previewGrid.renderMinimap(previewMinimapCtx, previewMinimapCanvas.width, previewMinimapCanvas.height, canvas.width, canvas.height);
+        }
+
+        // Render world minimap if minimap overlay is open
         if (minimap.classList.contains('open')) {
-            grid.renderMinimap(minimapCtx, minimapCanvas.width, minimapCanvas.height, canvas.width, canvas.height);
+            grid.renderMinimap(worldMinimapCtx, worldMinimapCanvas.width, worldMinimapCanvas.height, canvas.width, canvas.height);
         }
     } else {
         // Show loading message
@@ -1011,7 +1028,13 @@ document.getElementById('btnRegenerate')!.addEventListener('click', () => {
     const scale = macro + mid + micro;
     const size = parseInt(configMapSize.value);
 
+    // Generate full map
     grid.generatePerlinMap({ scale, seed: newSeed, size });
+
+    // Also update preview if config panel is open
+    if (configPanel.classList.contains('open')) {
+        updatePreviewGrid();
+    }
 });
 
 document.getElementById('btnExport')!.addEventListener('click', () => {
@@ -1152,7 +1175,6 @@ chkDualGrid.addEventListener('change', () => {
 });
 
 // Minimap toggle
-const minimap = document.getElementById('minimap')!;
 const btnMinimap = document.getElementById('btnMinimap')!;
 
 // Show minimap by default
@@ -1380,7 +1402,6 @@ function displayDebugInfo(info: TileDebugInfo) {
 }
 
 // --- CONFIG PANEL ---
-const configPanel = document.getElementById('configPanel')!;
 const btnConfig = document.getElementById('btnConfig')!;
 const btnApplyConfig = document.getElementById('btnApplyConfig')!;
 const btnRandomSeed = document.getElementById('btnRandomSeed')!;
@@ -1394,28 +1415,64 @@ const scaleMidValue = document.getElementById('scaleMidValue')!;
 const scaleMicroValue = document.getElementById('scaleMicroValue')!;
 const scaleTotalValue = document.getElementById('scaleTotalValue')!;
 
+// Update preview grid with current config settings
+function updatePreviewGrid() {
+    const size = parseInt(configMapSize.value);
+    const macro = parseFloat(configScaleMacro.value);
+    const mid = parseFloat(configScaleMid.value);
+    const micro = parseFloat(configScaleMicro.value);
+    const scale = macro + mid + micro;
+    const seedInput = configSeed.value.trim();
+    const seed = seedInput === '' ? null : parseFloat(seedInput);
+
+    // Validate size
+    if (size < 1 || size > 500 || isNaN(size)) return;
+    if (seedInput !== '' && isNaN(seed!)) return;
+
+    // Create or resize preview grid if needed
+    if (!previewGrid || previewGrid.width !== size || previewGrid.height !== size) {
+        previewGrid = new DualGridSystem(size, size);
+    }
+
+    // Generate preview map
+    previewGrid.generatePerlinMap({ scale, seed, size });
+}
+
 // Calculate combined scale from three sliders
 function updateCombinedScale() {
     const macro = parseFloat(configScaleMacro.value);
     const mid = parseFloat(configScaleMid.value);
     const micro = parseFloat(configScaleMicro.value);
     const total = macro + mid + micro;
-    
+
     scaleMacroValue.textContent = macro.toFixed(2);
     scaleMidValue.textContent = mid.toFixed(3);
     scaleMicroValue.textContent = micro.toFixed(4);
     scaleTotalValue.textContent = total.toFixed(5);
+
+    // Update preview when scale changes
+    updatePreviewGrid();
 }
 
 // Toggle config panel
 btnConfig.addEventListener('click', () => {
+    const wasOpen = configPanel.classList.contains('open');
     configPanel.classList.toggle('open');
+
+    // Initialize preview when opening panel
+    if (!wasOpen && configPanel.classList.contains('open')) {
+        updatePreviewGrid();
+    }
 });
 
 // Update scale display values when sliders change
 configScaleMacro.addEventListener('input', updateCombinedScale);
 configScaleMid.addEventListener('input', updateCombinedScale);
 configScaleMicro.addEventListener('input', updateCombinedScale);
+
+// Update preview when map size or seed changes
+configMapSize.addEventListener('input', updatePreviewGrid);
+configSeed.addEventListener('input', updatePreviewGrid);
 
 // Generate and display initial seed
 const initialSeed = Math.floor(Math.random() * 1000000);
@@ -1426,9 +1483,10 @@ grid.generatePerlinMap({ scale: 0.015, seed: initialSeed, size: GRID_SIZE });
 btnRandomSeed.addEventListener('click', () => {
     const randomSeed = Math.floor(Math.random() * 1000000);
     configSeed.value = randomSeed.toString();
+    updatePreviewGrid();
 });
 
-// Apply configuration and regenerate map
+// Apply configuration and regenerate full map
 btnApplyConfig.addEventListener('click', () => {
     const newSize = parseInt(configMapSize.value);
     const macro = parseFloat(configScaleMacro.value);
@@ -1437,18 +1495,18 @@ btnApplyConfig.addEventListener('click', () => {
     const scale = macro + mid + micro;
     const seedInput = configSeed.value.trim();
     const seed = seedInput === '' ? null : parseFloat(seedInput);
-    
+
     // Validate inputs
     if (newSize < 1 || newSize > 500) {
         alert('Map size must be between 1 and 500');
         return;
     }
-    
+
     if (seedInput !== '' && isNaN(seed!)) {
         alert('Seed must be a number or left empty');
         return;
     }
-    
+
     // Rebuild grid if size changed
     if (newSize !== grid.width || newSize !== grid.height) {
         console.log(`Resizing grid from ${grid.width}x${grid.height} to ${newSize}x${newSize}`);
@@ -1467,13 +1525,13 @@ btnApplyConfig.addEventListener('click', () => {
         (window as any).grid = newGrid;
         Object.assign(grid, newGrid);
     }
-    
-    // Generate with config
+
+    // Generate full map with same config as preview
     const config: MapConfig = { scale, seed, size: newSize };
     grid.generatePerlinMap(config);
-    
-    console.log(`Map regenerated with config:`, config);
-    
+
+    console.log(`Full map generated with config:`, config);
+
     // Close panel
     configPanel.classList.remove('open');
 });
