@@ -23,8 +23,7 @@ enum TerrainType {
     Water = 0,
     Sand = 1,
     Dirt = 2,
-    Grass = 3,
-    Stone = 4
+    Grass = 3
 }
 
 enum RenderMode {
@@ -74,15 +73,8 @@ const DEFAULT_BUCKETS: TerrainBucket[] = [
     { name: 'Water', color: '#225588', threshold: -1.0, terrainType: TerrainType.Water },
     { name: 'Sand', color: '#eebb44', threshold: -0.2, terrainType: TerrainType.Sand },
     { name: 'Dirt', color: '#885533', threshold: 0.0, terrainType: TerrainType.Dirt },
-    { name: 'Grass', color: '#44aa44', threshold: 0.3, terrainType: TerrainType.Grass },
-    { name: 'Stones', color: '#999999', threshold: 0.6, terrainType: TerrainType.Stone }
+    { name: 'Grass', color: '#44aa44', threshold: 0.3, terrainType: TerrainType.Grass }
 ];
-
-// Generate transition layer order from buckets (skip first/lowest terrain which is always the base)
-// This array is automatically derived from DEFAULT_BUCKETS and sorted by threshold
-const TRANSITION_LAYER_ORDER: TerrainType[] = DEFAULT_BUCKETS
-    .slice(1) // Skip the first (lowest) terrain - it's always the base layer
-    .map(bucket => bucket.terrainType);
 
 // --- DEBUG SYSTEM ---
 interface TileDebugInfo {
@@ -264,6 +256,7 @@ class DualGridSystem {
     public showMinimap: boolean = true;
     private debugTileX: number = -1;
     private debugTileY: number = -1;
+    private buckets: TerrainBucket[] = [...DEFAULT_BUCKETS]; // Store current bucket configuration
 
     constructor(width: number, height: number) {
         this.width = width;
@@ -285,6 +278,12 @@ class DualGridSystem {
     public setDebugTile(x: number, y: number) {
         this.debugTileX = x;
         this.debugTileY = y;
+    }
+
+    // Get transition layer order dynamically from current bucket configuration
+    private getTransitionLayerOrder(): TerrainType[] {
+        // Skip the first (lowest) bucket - it's always the base layer
+        return this.buckets.slice(1).map(b => b.terrainType);
     }
 
     public getDebugInfo(x: number, y: number): TileDebugInfo | null {
@@ -323,7 +322,7 @@ class DualGridSystem {
         }
 
         // Calculate transition layers
-        for (const currentLayer of TRANSITION_LAYER_ORDER) {
+        for (const currentLayer of this.getTransitionLayerOrder()) {
             // Wang tile bitmask - each bit represents a visual corner:
             // Bit 1 = Top visual corner (tl)
             // Bit 2 = Right visual corner (tr)
@@ -365,6 +364,9 @@ class DualGridSystem {
     }
 
     public generatePerlinMap(config: MapConfig) {
+        // Store the bucket configuration for use in rendering transitions
+        this.buckets = [...config.buckets];
+
         // Scale affects the "zoom" of the noise. Lower = larger continents.
         const scale = config.scale;
         const seed = config.seed !== null ? config.seed : Math.random() * 1000;
@@ -435,7 +437,7 @@ class DualGridSystem {
         // Each layer "splats" onto lower layers, creating natural coastlines
         // Skip Water (0) since it's already the base layer
         if (this.showTransitionLayer) {
-            for (const currentLayer of TRANSITION_LAYER_ORDER) {
+            for (const currentLayer of this.getTransitionLayerOrder()) {
                 for (let y = 0; y < this.height - 1; y++) {
                     for (let x = 0; x < this.width - 1; x++) {
                         // Map grid positions to visual isometric corners
@@ -831,7 +833,7 @@ class DualGridSystem {
 
         // PASS 2: TRANSITION TILES
         if (this.showTransitionLayer) {
-            for (const currentLayer of TRANSITION_LAYER_ORDER) {
+            for (const currentLayer of this.getTransitionLayerOrder()) {
                 for (let y = 0; y < this.height - 1; y++) {
                     for (let x = 0; x < this.width - 1; x++) {
                         const tl = this.getCell(x, y);
