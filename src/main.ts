@@ -3,7 +3,7 @@ import { createNoise2D } from 'simplex-noise';
 // --- CONFIGURATION ---
 const TILE_WIDTH = 64;   // Width of the tile in pixels
 const TILE_HEIGHT = 32;  // Height (usually half width for standard ISO)
-const GRID_SIZE = 30;    // Size of the data grid (30x30)
+const GRID_SIZE = 100;   // Size of the data grid (100x100)
 
 const noise2D = createNoise2D();
 
@@ -129,7 +129,7 @@ class DualGridSystem {
     public width: number;
     public height: number;
     public cells: TerrainType[];
-    public renderMode: RenderMode = RenderMode.IsometricTextured;
+    public renderMode: RenderMode = RenderMode.IsometricColored;
     public cameraOffsetX: number = 0;
     public cameraOffsetY: number = 0;
     public zoomLevel: number = 1.0;
@@ -137,7 +137,7 @@ class DualGridSystem {
     public showTransitionLayer: boolean = true;
     public showWorldGrid: boolean = false;
     public showDualGrid: boolean = false;
-    public showMinimap: boolean = false;
+    public showMinimap: boolean = true;
     private debugTileX: number = -1;
     private debugTileY: number = -1;
 
@@ -241,7 +241,7 @@ class DualGridSystem {
         return debugInfo;
     }
 
-    public generatePerlinMap(config: MapConfig = { scale: 0.08, seed: null, size: this.width }) {
+    public generatePerlinMap(config: MapConfig = { scale: 0.015, seed: null, size: this.width }) {
         // Scale affects the "zoom" of the noise. Lower = larger continents.
         const scale = config.scale;
         const seed = config.seed !== null ? config.seed : Math.random() * 1000;
@@ -626,6 +626,177 @@ class DualGridSystem {
         ctx.restore();
     }
     
+    public exportToImage(): HTMLCanvasElement | null {
+        // Create an offscreen canvas to render the full map
+        const tileWidth = this.renderMode === RenderMode.OrthographicColored ? 40 : TILE_WIDTH;
+        const tileHeight = this.renderMode === RenderMode.OrthographicColored ? 40 : TILE_HEIGHT;
+
+        // Calculate canvas size based on render mode
+        let canvasWidth: number;
+        let canvasHeight: number;
+
+        if (this.renderMode === RenderMode.OrthographicColored) {
+            // Orthographic: simple grid
+            canvasWidth = (this.width - 1) * tileWidth;
+            canvasHeight = (this.height - 1) * tileHeight;
+        } else {
+            // Isometric: diamond-shaped projection
+            // Width = (width + height - 1) * (TILE_WIDTH / 2)
+            // Height = (width + height - 1) * (TILE_HEIGHT / 2) + TILE_HEIGHT
+            canvasWidth = (this.width + this.height - 1) * (TILE_WIDTH / 2) + TILE_WIDTH;
+            canvasHeight = (this.width + this.height - 1) * (TILE_HEIGHT / 2) + TILE_HEIGHT;
+        }
+
+        // Check if canvas size exceeds browser limits
+        // Most browsers support max 16384x16384, but we'll use a conservative limit
+        const MAX_DIMENSION = 16384;
+        const MAX_PIXELS = 100_000_000; // 100 megapixels (conservative limit)
+
+        if (canvasWidth > MAX_DIMENSION || canvasHeight > MAX_DIMENSION) {
+            console.error(`Export failed: Canvas dimensions (${canvasWidth}×${canvasHeight}) exceed maximum (${MAX_DIMENSION}×${MAX_DIMENSION})`);
+            return null;
+        }
+
+        const totalPixels = canvasWidth * canvasHeight;
+        if (totalPixels > MAX_PIXELS) {
+            console.error(`Export failed: Total pixels (${totalPixels.toLocaleString()}) exceed maximum (${MAX_PIXELS.toLocaleString()})`);
+            return null;
+        }
+
+        const exportCanvas = document.createElement('canvas');
+        exportCanvas.width = canvasWidth;
+        exportCanvas.height = canvasHeight;
+        const exportCtx = exportCanvas.getContext('2d')!;
+
+        // Fill with background
+        exportCtx.fillStyle = '#0d0d0d';
+        exportCtx.fillRect(0, 0, canvasWidth, canvasHeight);
+
+        if (!assetsLoaded) return exportCanvas;
+
+        // Calculate origin (center of canvas, no camera offset)
+        const originX = canvasWidth / 2;
+        const originY = this.renderMode === RenderMode.OrthographicColored
+            ? 0  // Top-left for orthographic
+            : canvasHeight / 2 - (this.height - 1) * (TILE_HEIGHT / 2) / 2;  // Center vertically for isometric
+
+        // PASS 1: BASE FULL TILES
+        if (this.showBaseLayer) {
+            for (let y = 0; y < this.height - 1; y++) {
+                for (let x = 0; x < this.width - 1; x++) {
+                    const tl = this.getCell(x, y);
+                    const tr = this.getCell(x + 1, y);
+                    const bl = this.getCell(x + 1, y + 1);
+                    const br = this.getCell(x, y + 1);
+
+                    const minTerrain = Math.min(tl, tr, bl, br);
+                    const { drawX, drawY } = this.calculateExportTilePosition(x, y, originX, originY);
+                    this.drawTileByRoleExport(exportCtx, drawX, drawY, minTerrain, 15);
+                }
+            }
+        }
+
+        // PASS 2: TRANSITION TILES
+        if (this.showTransitionLayer) {
+            const layerOrder = [TerrainType.Sand, TerrainType.Dirt, TerrainType.Grass];
+
+            for (const currentLayer of layerOrder) {
+                for (let y = 0; y < this.height - 1; y++) {
+                    for (let x = 0; x < this.width - 1; x++) {
+                        const tl = this.getCell(x, y);
+                        const tr = this.getCell(x + 1, y);
+                        const bl = this.getCell(x + 1, y + 1);
+                        const br = this.getCell(x, y + 1);
+
+                        let role = 0;
+                        if (tl >= currentLayer) role |= 1;
+                        if (tr >= currentLayer) role |= 2;
+                        if (bl >= currentLayer) role |= 4;
+                        if (br >= currentLayer) role |= 8;
+
+                        if (role === 0 || role === 15) continue;
+
+                        const { drawX, drawY } = this.calculateExportTilePosition(x, y, originX, originY);
+                        this.drawTileByRoleExport(exportCtx, drawX, drawY, currentLayer, role);
+                    }
+                }
+            }
+        }
+
+        return exportCanvas;
+    }
+
+    private calculateExportTilePosition(x: number, y: number, originX: number, originY: number): { drawX: number, drawY: number } {
+        let drawX, drawY;
+
+        if (this.renderMode === RenderMode.OrthographicColored) {
+            drawX = originX + x * 40;
+            drawY = originY + y * 40;
+        } else {
+            const centerX = x + 0.5;
+            const centerY = y + 0.5;
+            drawX = originX + (centerX - centerY) * (TILE_WIDTH / 2);
+            drawY = originY + (centerX + centerY) * (TILE_HEIGHT / 2);
+        }
+
+        return { drawX, drawY };
+    }
+
+    private drawTileByRoleExport(
+        ctx: CanvasRenderingContext2D,
+        x: number, y: number,
+        terrainLayer: TerrainType,
+        role: number
+    ) {
+        if (role === 0) return;
+
+        const colors = {
+            [TerrainType.Water]: '#225588',
+            [TerrainType.Sand]:  '#eebb44',
+            [TerrainType.Dirt]:  '#885533',
+            [TerrainType.Grass]: '#44aa44'
+        };
+
+        if (this.renderMode === RenderMode.IsometricTextured) {
+            const assets = terrainAssets.get(terrainLayer);
+            if (!assets || !assets.image.complete) return;
+
+            const tileId = assets.roleToId.get(role);
+            if (tileId === undefined) return;
+
+            const tilesPerRow = 8;
+            const row = Math.floor(tileId / tilesPerRow);
+            const col = tileId % tilesPerRow;
+            const srcX = col * TILE_WIDTH;
+            const srcY = row * TILE_HEIGHT;
+
+            ctx.drawImage(
+                assets.image,
+                srcX, srcY, TILE_WIDTH, TILE_HEIGHT,
+                x - TILE_WIDTH / 2, y - TILE_HEIGHT / 2,
+                TILE_WIDTH, TILE_HEIGHT
+            );
+        } else if (this.renderMode === RenderMode.IsometricColored) {
+            ctx.fillStyle = colors[terrainLayer];
+            ctx.beginPath();
+            ctx.moveTo(x, y - TILE_HEIGHT / 2);
+            ctx.lineTo(x + TILE_WIDTH / 2, y);
+            ctx.lineTo(x, y + TILE_HEIGHT / 2);
+            ctx.lineTo(x - TILE_WIDTH / 2, y);
+            ctx.closePath();
+            ctx.fill();
+        } else {
+            const size = 40;
+            const half = size / 2;
+            ctx.fillStyle = colors[terrainLayer];
+
+            if (role & 1) ctx.fillRect(x, y, half, half);
+            if (role & 2) ctx.fillRect(x + half, y, half, half);
+            if (role & 4) ctx.fillRect(x, y + half, half, half);
+            if (role & 8) ctx.fillRect(x + half, y + half, half, half);
+        }
+    }
+
     public renderMinimap(ctx: CanvasRenderingContext2D, width: number, height: number, canvasWidth: number, canvasHeight: number) {
         // Clear minimap
         ctx.fillStyle = '#0d0d0d';
@@ -783,7 +954,6 @@ function resizeCanvas() {
 resizeCanvas();
 
 const grid = new DualGridSystem(GRID_SIZE, GRID_SIZE);
-grid.generatePerlinMap();
 
 // Minimap setup
 const minimapCanvas = document.getElementById('minimapCanvas') as HTMLCanvasElement;
@@ -829,7 +999,86 @@ loop();
 // Use event listeners instead of inline onclick
 document.getElementById('btnRegenerate')!.addEventListener('click', () => {
     console.log("Regenerating map...");
-    grid.generatePerlinMap();
+
+    // Generate new random seed
+    const newSeed = Math.floor(Math.random() * 1000000);
+    configSeed.value = newSeed.toString();
+
+    // Use current config values
+    const macro = parseFloat(configScaleMacro.value);
+    const mid = parseFloat(configScaleMid.value);
+    const micro = parseFloat(configScaleMicro.value);
+    const scale = macro + mid + micro;
+    const size = parseInt(configMapSize.value);
+
+    grid.generatePerlinMap({ scale, seed: newSeed, size });
+});
+
+document.getElementById('btnExport')!.addEventListener('click', () => {
+    if (!assetsLoaded) {
+        alert('Please wait for assets to load before exporting');
+        return;
+    }
+
+    console.log("Exporting map to image...");
+
+    // Calculate estimated export size for user feedback
+    const tileWidth = grid.renderMode === RenderMode.OrthographicColored ? 40 : TILE_WIDTH;
+    const tileHeight = grid.renderMode === RenderMode.OrthographicColored ? 40 : TILE_HEIGHT;
+
+    let estimatedWidth: number;
+    let estimatedHeight: number;
+
+    if (grid.renderMode === RenderMode.OrthographicColored) {
+        estimatedWidth = (grid.width - 1) * tileWidth;
+        estimatedHeight = (grid.height - 1) * tileHeight;
+    } else {
+        estimatedWidth = (grid.width + grid.height - 1) * (TILE_WIDTH / 2) + TILE_WIDTH;
+        estimatedHeight = (grid.width + grid.height - 1) * (TILE_HEIGHT / 2) + TILE_HEIGHT;
+    }
+
+    // Generate the export canvas
+    const exportCanvas = grid.exportToImage();
+
+    if (!exportCanvas) {
+        const megapixels = (estimatedWidth * estimatedHeight / 1_000_000).toFixed(1);
+        alert(
+            `Export failed: Map is too large to export!\n\n` +
+            `Current map size: ${grid.width}×${grid.height}\n` +
+            `Export dimensions: ${estimatedWidth}×${estimatedHeight} pixels (${megapixels} MP)\n\n` +
+            `Recommended maximum map size:\n` +
+            `• Isometric modes: ~200×200\n` +
+            `• Orthographic mode: ~250×250\n\n` +
+            `Please reduce the map size in the configuration panel.`
+        );
+        return;
+    }
+
+    // Convert to blob and download
+    exportCanvas.toBlob((blob) => {
+        if (!blob) {
+            alert('Failed to generate image blob');
+            return;
+        }
+
+        // Create download link
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+
+        // Generate filename with timestamp
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+        const modeNames = ['isometric-textured', 'isometric-colored', 'orthographic'];
+        const modeName = modeNames[grid.renderMode];
+        link.download = `terrain-map-${modeName}-${timestamp}.png`;
+
+        link.href = url;
+        link.click();
+
+        // Clean up
+        URL.revokeObjectURL(url);
+
+        console.log(`Exported map as ${link.download} (${estimatedWidth}×${estimatedHeight}px)`);
+    }, 'image/png');
 });
 
 // Mode buttons
@@ -905,6 +1154,9 @@ chkDualGrid.addEventListener('change', () => {
 // Minimap toggle
 const minimap = document.getElementById('minimap')!;
 const btnMinimap = document.getElementById('btnMinimap')!;
+
+// Show minimap by default
+minimap.classList.add('open');
 
 btnMinimap.addEventListener('click', () => {
     minimap.classList.toggle('open');
@@ -1164,6 +1416,11 @@ btnConfig.addEventListener('click', () => {
 configScaleMacro.addEventListener('input', updateCombinedScale);
 configScaleMid.addEventListener('input', updateCombinedScale);
 configScaleMicro.addEventListener('input', updateCombinedScale);
+
+// Generate and display initial seed
+const initialSeed = Math.floor(Math.random() * 1000000);
+configSeed.value = initialSeed.toString();
+grid.generatePerlinMap({ scale: 0.015, seed: initialSeed, size: GRID_SIZE });
 
 // Random seed button
 btnRandomSeed.addEventListener('click', () => {
