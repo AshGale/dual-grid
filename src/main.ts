@@ -21,6 +21,12 @@ enum RenderMode {
     OrthographicColored = 2
 }
 
+interface MapConfig {
+    scale: number;
+    seed: number | null;
+    size: number;
+}
+
 interface WangTileMember {
     id: number;
     role: number;
@@ -126,6 +132,7 @@ class DualGridSystem {
     public renderMode: RenderMode = RenderMode.IsometricTextured;
     public cameraOffsetX: number = 0;
     public cameraOffsetY: number = 0;
+    public zoomLevel: number = 1.0;
     public showBaseLayer: boolean = true;
     public showTransitionLayer: boolean = true;
     public showWorldGrid: boolean = false;
@@ -233,10 +240,10 @@ class DualGridSystem {
         return debugInfo;
     }
 
-    public generatePerlinMap() {
+    public generatePerlinMap(config: MapConfig = { scale: 0.08, seed: null, size: this.width }) {
         // Scale affects the "zoom" of the noise. Lower = larger continents.
-        const scale = 0.08;
-        const seed = Math.random() * 1000;
+        const scale = config.scale;
+        const seed = config.seed !== null ? config.seed : Math.random() * 1000;
 
         for (let y = 0; y < this.height; y++) {
             for (let x = 0; x < this.width; x++) {
@@ -256,6 +263,14 @@ class DualGridSystem {
 
     public render(ctx: CanvasRenderingContext2D, canvasWidth: number, canvasHeight: number) {
         if (!assetsLoaded) return; // Wait for assets to load
+
+        // Save context state
+        ctx.save();
+        
+        // Apply zoom transformation
+        ctx.translate(canvasWidth / 2, canvasHeight / 2);
+        ctx.scale(this.zoomLevel, this.zoomLevel);
+        ctx.translate(-canvasWidth / 2, -canvasHeight / 2);
 
         // Center the isometric map in the canvas with camera offset
         const originX = canvasWidth / 2 + this.cameraOffsetX;
@@ -605,6 +620,9 @@ class DualGridSystem {
                 ctx.fillRect(x + half, y + half, half, half);
             }
         }
+        
+        // Restore context state (undo zoom transformation)
+        ctx.restore();
     }
 }
 
@@ -779,6 +797,37 @@ canvas.addEventListener('mouseleave', () => {
     isDragging = false;
 });
 
+// Mouse wheel zoom
+canvas.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    
+    const zoomFactor = 0.1;
+    const delta = e.deltaY > 0 ? -zoomFactor : zoomFactor;
+    
+    // Calculate new zoom level with limits
+    const newZoom = Math.max(0.1, Math.min(5.0, grid.zoomLevel + delta));
+    
+    // Get mouse position relative to canvas
+    const rect = canvas.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
+    
+    // Calculate world position before zoom
+    const worldXBefore = (mouseX - canvas.width / 2 - grid.cameraOffsetX) / grid.zoomLevel;
+    const worldYBefore = (mouseY - canvas.height / 2 - grid.cameraOffsetY) / grid.zoomLevel;
+    
+    // Update zoom
+    grid.zoomLevel = newZoom;
+    
+    // Calculate world position after zoom
+    const worldXAfter = (mouseX - canvas.width / 2 - grid.cameraOffsetX) / grid.zoomLevel;
+    const worldYAfter = (mouseY - canvas.height / 2 - grid.cameraOffsetY) / grid.zoomLevel;
+    
+    // Adjust camera to keep mouse point fixed
+    grid.cameraOffsetX += (worldXAfter - worldXBefore) * grid.zoomLevel;
+    grid.cameraOffsetY += (worldYAfter - worldYBefore) * grid.zoomLevel;
+});
+
 // --- DEBUG PANEL ---
 const debugPanel = document.getElementById('debugPanel')!;
 const debugContent = document.getElementById('debugContent')!;
@@ -936,3 +985,98 @@ function displayDebugInfo(info: TileDebugInfo) {
 
     debugContent.innerHTML = html;
 }
+
+// --- CONFIG PANEL ---
+const configPanel = document.getElementById('configPanel')!;
+const btnConfig = document.getElementById('btnConfig')!;
+const btnApplyConfig = document.getElementById('btnApplyConfig')!;
+const btnRandomSeed = document.getElementById('btnRandomSeed')!;
+const configScaleMacro = document.getElementById('configScaleMacro') as HTMLInputElement;
+const configScaleMid = document.getElementById('configScaleMid') as HTMLInputElement;
+const configScaleMicro = document.getElementById('configScaleMicro') as HTMLInputElement;
+const configMapSize = document.getElementById('configMapSize') as HTMLInputElement;
+const configSeed = document.getElementById('configSeed') as HTMLInputElement;
+const scaleMacroValue = document.getElementById('scaleMacroValue')!;
+const scaleMidValue = document.getElementById('scaleMidValue')!;
+const scaleMicroValue = document.getElementById('scaleMicroValue')!;
+const scaleTotalValue = document.getElementById('scaleTotalValue')!;
+
+// Calculate combined scale from three sliders
+function updateCombinedScale() {
+    const macro = parseFloat(configScaleMacro.value);
+    const mid = parseFloat(configScaleMid.value);
+    const micro = parseFloat(configScaleMicro.value);
+    const total = macro + mid + micro;
+    
+    scaleMacroValue.textContent = macro.toFixed(2);
+    scaleMidValue.textContent = mid.toFixed(3);
+    scaleMicroValue.textContent = micro.toFixed(4);
+    scaleTotalValue.textContent = total.toFixed(5);
+}
+
+// Toggle config panel
+btnConfig.addEventListener('click', () => {
+    configPanel.classList.toggle('open');
+});
+
+// Update scale display values when sliders change
+configScaleMacro.addEventListener('input', updateCombinedScale);
+configScaleMid.addEventListener('input', updateCombinedScale);
+configScaleMicro.addEventListener('input', updateCombinedScale);
+
+// Random seed button
+btnRandomSeed.addEventListener('click', () => {
+    const randomSeed = Math.floor(Math.random() * 1000000);
+    configSeed.value = randomSeed.toString();
+});
+
+// Apply configuration and regenerate map
+btnApplyConfig.addEventListener('click', () => {
+    const newSize = parseInt(configMapSize.value);
+    const macro = parseFloat(configScaleMacro.value);
+    const mid = parseFloat(configScaleMid.value);
+    const micro = parseFloat(configScaleMicro.value);
+    const scale = macro + mid + micro;
+    const seedInput = configSeed.value.trim();
+    const seed = seedInput === '' ? null : parseFloat(seedInput);
+    
+    // Validate inputs
+    if (newSize < 1 || newSize > 500) {
+        alert('Map size must be between 1 and 500');
+        return;
+    }
+    
+    if (seedInput !== '' && isNaN(seed!)) {
+        alert('Seed must be a number or left empty');
+        return;
+    }
+    
+    // Rebuild grid if size changed
+    if (newSize !== grid.width || newSize !== grid.height) {
+        console.log(`Resizing grid from ${grid.width}x${grid.height} to ${newSize}x${newSize}`);
+        // Create new grid with new size
+        const newGrid = new DualGridSystem(newSize, newSize);
+        // Copy over settings
+        newGrid.renderMode = grid.renderMode;
+        newGrid.cameraOffsetX = grid.cameraOffsetX;
+        newGrid.cameraOffsetY = grid.cameraOffsetY;
+        newGrid.zoomLevel = grid.zoomLevel;
+        newGrid.showBaseLayer = grid.showBaseLayer;
+        newGrid.showTransitionLayer = grid.showTransitionLayer;
+        newGrid.showWorldGrid = grid.showWorldGrid;
+        newGrid.showDualGrid = grid.showDualGrid;
+        // Replace global grid reference
+        (window as any).grid = newGrid;
+        Object.assign(grid, newGrid);
+    }
+    
+    // Generate with config
+    const config: MapConfig = { scale, seed, size: newSize };
+    grid.generatePerlinMap(config);
+    
+    console.log(`Map regenerated with config:`, config);
+    
+    // Close panel
+    configPanel.classList.remove('open');
+});
+
