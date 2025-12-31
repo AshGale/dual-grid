@@ -21,10 +21,18 @@ enum RenderMode {
     OrthographicColored = 2
 }
 
+interface TerrainBucket {
+    name: string;
+    color: string;
+    threshold: number; // Minimum noise value for this terrain
+    terrainType: TerrainType; // Maps to asset loading if available
+}
+
 interface MapConfig {
     scale: number;
     seed: number | null;
     size: number;
+    buckets: TerrainBucket[];
 }
 
 interface WangTileMember {
@@ -46,6 +54,14 @@ interface TerrainAssets {
 
 const terrainAssets: Map<TerrainType, TerrainAssets> = new Map();
 let assetsLoaded = false;
+
+// Default terrain buckets - sorted by threshold (lowest to highest)
+const DEFAULT_BUCKETS: TerrainBucket[] = [
+    { name: 'Water', color: '#225588', threshold: -1.0, terrainType: TerrainType.Water },
+    { name: 'Sand', color: '#eebb44', threshold: -0.2, terrainType: TerrainType.Sand },
+    { name: 'Dirt', color: '#885533', threshold: 0.0, terrainType: TerrainType.Dirt },
+    { name: 'Grass', color: '#44aa44', threshold: 0.3, terrainType: TerrainType.Grass }
+];
 
 // --- DEBUG SYSTEM ---
 interface TileDebugInfo {
@@ -241,21 +257,27 @@ class DualGridSystem {
         return debugInfo;
     }
 
-    public generatePerlinMap(config: MapConfig = { scale: 0.015, seed: null, size: this.width }) {
+    public generatePerlinMap(config: MapConfig) {
         // Scale affects the "zoom" of the noise. Lower = larger continents.
         const scale = config.scale;
         const seed = config.seed !== null ? config.seed : Math.random() * 1000;
+
+        // Sort buckets by threshold (highest to lowest) for easier checking
+        const sortedBuckets = [...config.buckets].sort((a, b) => b.threshold - a.threshold);
 
         for (let y = 0; y < this.height; y++) {
             for (let x = 0; x < this.width; x++) {
                 // Get noise value between -1 and 1
                 const value = noise2D((x + seed) * scale, (y + seed) * scale);
 
-                // Map noise to Terrain
-                let type = TerrainType.Water;
-                if (value > -0.2) type = TerrainType.Sand;
-                if (value > 0.0) type = TerrainType.Dirt;
-                if (value > 0.3) type = TerrainType.Grass;
+                // Find the appropriate bucket - check from highest threshold to lowest
+                let type = sortedBuckets[sortedBuckets.length - 1].terrainType; // Default to lowest bucket
+                for (const bucket of sortedBuckets) {
+                    if (value >= bucket.threshold) {
+                        type = bucket.terrainType;
+                        break;
+                    }
+                }
 
                 this.setCell(x, y, type);
             }
@@ -526,18 +548,24 @@ class DualGridSystem {
         // Skip if role is 0 (no corners match)
         if (role === 0) return;
 
-        const colors = {
-            [TerrainType.Water]: '#225588',
-            [TerrainType.Sand]:  '#eebb44',
-            [TerrainType.Dirt]:  '#885533',
-            [TerrainType.Grass]: '#44aa44'
-        };
+        // Get color from current buckets configuration
+        const bucket = currentBuckets.find(b => b.terrainType === terrainLayer);
+        const terrainColor = bucket ? bucket.color : '#888888'; // Fallback gray if not found
 
         if (this.renderMode === RenderMode.IsometricTextured) {
             // Textured Isometric Mode
             const assets = terrainAssets.get(terrainLayer);
             if (!assets) {
-                console.warn(`[RENDER] No assets found for terrain: ${TerrainType[terrainLayer]}`);
+                console.warn(`[RENDER] No assets found for terrain: ${TerrainType[terrainLayer]}, using color fallback`);
+                // Fallback to colored rendering
+                ctx.fillStyle = terrainColor;
+                ctx.beginPath();
+                ctx.moveTo(x, y - TILE_HEIGHT / 2);
+                ctx.lineTo(x + TILE_WIDTH / 2, y);
+                ctx.lineTo(x, y + TILE_HEIGHT / 2);
+                ctx.lineTo(x - TILE_WIDTH / 2, y);
+                ctx.closePath();
+                ctx.fill();
                 return;
             }
 
@@ -588,7 +616,7 @@ class DualGridSystem {
 
         } else if (this.renderMode === RenderMode.IsometricColored) {
             // Colored Isometric Mode - draw a diamond with solid color
-            ctx.fillStyle = colors[terrainLayer];
+            ctx.fillStyle = terrainColor;
             ctx.beginPath();
             ctx.moveTo(x, y - TILE_HEIGHT / 2);  // Top
             ctx.lineTo(x + TILE_WIDTH / 2, y);   // Right
@@ -602,7 +630,7 @@ class DualGridSystem {
             const size = 40;
             const half = size / 2;
 
-            ctx.fillStyle = colors[terrainLayer];
+            ctx.fillStyle = terrainColor;
 
             // Bit 1 = Top visual corner -> top-left quadrant
             if (role & 1) {
@@ -750,16 +778,24 @@ class DualGridSystem {
     ) {
         if (role === 0) return;
 
-        const colors = {
-            [TerrainType.Water]: '#225588',
-            [TerrainType.Sand]:  '#eebb44',
-            [TerrainType.Dirt]:  '#885533',
-            [TerrainType.Grass]: '#44aa44'
-        };
+        // Get color from current buckets configuration
+        const bucket = currentBuckets.find(b => b.terrainType === terrainLayer);
+        const terrainColor = bucket ? bucket.color : '#888888'; // Fallback gray if not found
 
         if (this.renderMode === RenderMode.IsometricTextured) {
             const assets = terrainAssets.get(terrainLayer);
-            if (!assets || !assets.image.complete) return;
+            if (!assets || !assets.image.complete) {
+                // Fallback to colored rendering if texture not available
+                ctx.fillStyle = terrainColor;
+                ctx.beginPath();
+                ctx.moveTo(x, y - TILE_HEIGHT / 2);
+                ctx.lineTo(x + TILE_WIDTH / 2, y);
+                ctx.lineTo(x, y + TILE_HEIGHT / 2);
+                ctx.lineTo(x - TILE_WIDTH / 2, y);
+                ctx.closePath();
+                ctx.fill();
+                return;
+            }
 
             const tileId = assets.roleToId.get(role);
             if (tileId === undefined) return;
@@ -777,7 +813,7 @@ class DualGridSystem {
                 TILE_WIDTH, TILE_HEIGHT
             );
         } else if (this.renderMode === RenderMode.IsometricColored) {
-            ctx.fillStyle = colors[terrainLayer];
+            ctx.fillStyle = terrainColor;
             ctx.beginPath();
             ctx.moveTo(x, y - TILE_HEIGHT / 2);
             ctx.lineTo(x + TILE_WIDTH / 2, y);
@@ -788,7 +824,7 @@ class DualGridSystem {
         } else {
             const size = 40;
             const half = size / 2;
-            ctx.fillStyle = colors[terrainLayer];
+            ctx.fillStyle = terrainColor;
 
             if (role & 1) ctx.fillRect(x, y, half, half);
             if (role & 2) ctx.fillRect(x + half, y, half, half);
@@ -808,13 +844,12 @@ class DualGridSystem {
         const pixelWidth = width / this.width;
         const pixelHeight = height / this.height;
         
-        // Terrain colors for minimap
-        const terrainColors: Record<TerrainType, string> = {
-            [TerrainType.Water]: '#4da6ff',
-            [TerrainType.Sand]: '#ffcc66',
-            [TerrainType.Dirt]: '#cc8855',
-            [TerrainType.Grass]: '#66dd66'
-        };
+        // Build terrain colors map from current buckets (brighter versions for minimap)
+        const terrainColors: Record<TerrainType, string> = {} as Record<TerrainType, string>;
+        currentBuckets.forEach(bucket => {
+            // Use the bucket color directly for minimap
+            terrainColors[bucket.terrainType] = bucket.color;
+        });
         
         // Draw each cell as a colored pixel
         for (let y = 0; y < this.height; y++) {
@@ -1028,8 +1063,8 @@ document.getElementById('btnRegenerate')!.addEventListener('click', () => {
     const scale = macro + mid + micro;
     const size = parseInt(configMapSize.value);
 
-    // Generate full map
-    grid.generatePerlinMap({ scale, seed: newSeed, size });
+    // Generate full map using current bucket configuration
+    grid.generatePerlinMap({ scale, seed: newSeed, size, buckets: currentBuckets });
 
     // Also update preview if config panel is open
     if (configPanel.classList.contains('open')) {
@@ -1415,6 +1450,188 @@ const scaleMidValue = document.getElementById('scaleMidValue')!;
 const scaleMicroValue = document.getElementById('scaleMicroValue')!;
 const scaleTotalValue = document.getElementById('scaleTotalValue')!;
 
+// Collapsible section handlers
+const mapGenHeader = document.getElementById('mapGenHeader')!;
+const mapGenContent = document.getElementById('mapGenContent')!;
+const bucketsHeader = document.getElementById('bucketsHeader')!;
+const bucketsContent = document.getElementById('bucketsContent')!;
+const bucketsList = document.getElementById('bucketsList')!;
+
+mapGenHeader.addEventListener('click', () => {
+    const arrow = mapGenHeader.querySelector('.collapsible-arrow')!;
+    arrow.classList.toggle('collapsed');
+    mapGenContent.classList.toggle('collapsed');
+});
+
+bucketsHeader.addEventListener('click', () => {
+    const arrow = bucketsHeader.querySelector('.collapsible-arrow')!;
+    arrow.classList.toggle('collapsed');
+    bucketsContent.classList.toggle('collapsed');
+});
+
+// Store current bucket configuration
+let currentBuckets: TerrainBucket[] = [...DEFAULT_BUCKETS];
+
+// Next available terrain type ID (for dynamically created terrains)
+let nextTerrainTypeId = 4; // Start after Water(0), Sand(1), Dirt(2), Grass(3)
+
+// Generate bucket UI controls
+function generateBucketInputs() {
+    bucketsList.innerHTML = '';
+
+    currentBuckets.forEach((bucket, index) => {
+        const row = document.createElement('div');
+        row.className = 'bucket-row';
+
+        // Color preview
+        const colorPreview = document.createElement('div');
+        colorPreview.className = 'bucket-color-preview';
+        colorPreview.style.backgroundColor = bucket.color;
+
+        // Name input
+        const nameInput = document.createElement('input');
+        nameInput.type = 'text';
+        nameInput.className = 'bucket-name';
+        nameInput.value = bucket.name;
+        nameInput.dataset.bucketIndex = index.toString();
+        nameInput.addEventListener('input', (e) => {
+            const target = e.target as HTMLInputElement;
+            const idx = parseInt(target.dataset.bucketIndex!);
+            currentBuckets[idx].name = target.value;
+            updatePreviewGrid();
+        });
+
+        // Threshold input
+        const thresholdInput = document.createElement('input');
+        thresholdInput.type = 'number';
+        thresholdInput.className = 'bucket-threshold';
+        thresholdInput.value = bucket.threshold.toString();
+        thresholdInput.min = '-1.0';
+        thresholdInput.max = '1.0';
+        thresholdInput.step = '0.1';
+        thresholdInput.dataset.bucketIndex = index.toString();
+        thresholdInput.addEventListener('input', (e) => {
+            const target = e.target as HTMLInputElement;
+            const idx = parseInt(target.dataset.bucketIndex!);
+            currentBuckets[idx].threshold = parseFloat(target.value);
+            updatePreviewGrid();
+        });
+
+        // Color picker
+        const colorInput = document.createElement('input');
+        colorInput.type = 'color';
+        colorInput.value = bucket.color;
+        colorInput.style.width = '40px';
+        colorInput.style.height = '30px';
+        colorInput.style.cursor = 'pointer';
+        colorInput.style.border = '1px solid #555';
+        colorInput.style.borderRadius = '3px';
+        colorInput.dataset.bucketIndex = index.toString();
+        colorInput.addEventListener('input', (e) => {
+            const target = e.target as HTMLInputElement;
+            const idx = parseInt(target.dataset.bucketIndex!);
+            currentBuckets[idx].color = target.value;
+            colorPreview.style.backgroundColor = target.value;
+            updatePreviewGrid();
+        });
+
+        // Remove button (only show if more than 1 bucket)
+        const removeBtn = document.createElement('button');
+        removeBtn.className = 'bucket-remove-btn';
+        removeBtn.textContent = '×';
+        removeBtn.title = 'Remove this terrain bucket';
+        removeBtn.dataset.bucketIndex = index.toString();
+        if (currentBuckets.length <= 1) {
+            removeBtn.disabled = true;
+            removeBtn.style.opacity = '0.3';
+            removeBtn.style.cursor = 'not-allowed';
+        }
+        removeBtn.addEventListener('click', (e) => {
+            const target = e.target as HTMLButtonElement;
+            const idx = parseInt(target.dataset.bucketIndex!);
+            if (currentBuckets.length > 1) {
+                currentBuckets.splice(idx, 1);
+                generateBucketInputs();
+                updatePreviewGrid();
+            }
+        });
+
+        row.appendChild(colorPreview);
+        row.appendChild(nameInput);
+        row.appendChild(thresholdInput);
+        row.appendChild(colorInput);
+        row.appendChild(removeBtn);
+        bucketsList.appendChild(row);
+    });
+}
+
+// Add new bucket button handler
+const btnAddBucket = document.getElementById('btnAddBucket')!;
+btnAddBucket.addEventListener('click', () => {
+    // Generate a random color
+    const randomColor = '#' + Math.floor(Math.random() * 16777215).toString(16).padStart(6, '0');
+
+    // Find a good default threshold (midpoint between highest and 1.0)
+    const maxThreshold = Math.max(...currentBuckets.map(b => b.threshold));
+    const defaultThreshold = Math.min(maxThreshold + 0.2, 1.0);
+
+    // Create new bucket
+    const newBucket: TerrainBucket = {
+        name: `Terrain ${nextTerrainTypeId}`,
+        color: randomColor,
+        threshold: defaultThreshold,
+        terrainType: nextTerrainTypeId as TerrainType
+    };
+
+    nextTerrainTypeId++;
+    currentBuckets.push(newBucket);
+    generateBucketInputs();
+    updatePreviewGrid();
+});
+
+// Initialize bucket inputs
+generateBucketInputs();
+
+// --- PANEL RESIZING ---
+const configResizeHandle = document.getElementById('configResizeHandle')!;
+const debugResizeHandle = document.getElementById('debugResizeHandle')!;
+
+let isResizingConfig = false;
+let isResizingDebug = false;
+let startX = 0;
+let startWidth = 0;
+
+configResizeHandle.addEventListener('mousedown', (e) => {
+    isResizingConfig = true;
+    startX = e.clientX;
+    startWidth = configPanel.offsetWidth;
+    e.preventDefault();
+});
+
+debugResizeHandle.addEventListener('mousedown', (e) => {
+    isResizingDebug = true;
+    startX = e.clientX;
+    startWidth = debugPanel.offsetWidth;
+    e.preventDefault();
+});
+
+document.addEventListener('mousemove', (e) => {
+    if (isResizingConfig) {
+        const deltaX = e.clientX - startX;
+        const newWidth = Math.max(250, Math.min(600, startWidth + deltaX));
+        configPanel.style.width = `${newWidth}px`;
+    } else if (isResizingDebug) {
+        const deltaX = startX - e.clientX; // Reverse for right-side panel
+        const newWidth = Math.max(300, Math.min(700, startWidth + deltaX));
+        debugPanel.style.width = `${newWidth}px`;
+    }
+});
+
+document.addEventListener('mouseup', () => {
+    isResizingConfig = false;
+    isResizingDebug = false;
+});
+
 // Update preview grid with current config settings
 function updatePreviewGrid() {
     const size = parseInt(configMapSize.value);
@@ -1434,8 +1651,8 @@ function updatePreviewGrid() {
         previewGrid = new DualGridSystem(size, size);
     }
 
-    // Generate preview map
-    previewGrid.generatePerlinMap({ scale, seed, size });
+    // Generate preview map using current bucket configuration
+    previewGrid.generatePerlinMap({ scale, seed, size, buckets: currentBuckets });
 }
 
 // Calculate combined scale from three sliders
@@ -1477,7 +1694,7 @@ configSeed.addEventListener('input', updatePreviewGrid);
 // Generate and display initial seed
 const initialSeed = Math.floor(Math.random() * 1000000);
 configSeed.value = initialSeed.toString();
-grid.generatePerlinMap({ scale: 0.015, seed: initialSeed, size: GRID_SIZE });
+grid.generatePerlinMap({ scale: 0.015, seed: initialSeed, size: GRID_SIZE, buckets: DEFAULT_BUCKETS });
 
 // Random seed button
 btnRandomSeed.addEventListener('click', () => {
@@ -1526,8 +1743,8 @@ btnApplyConfig.addEventListener('click', () => {
         Object.assign(grid, newGrid);
     }
 
-    // Generate full map with same config as preview
-    const config: MapConfig = { scale, seed, size: newSize };
+    // Generate full map with same config as preview using current bucket configuration
+    const config: MapConfig = { scale, seed, size: newSize, buckets: currentBuckets };
     grid.generatePerlinMap(config);
 
     console.log(`Full map generated with config:`, config);

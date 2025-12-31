@@ -81,6 +81,8 @@
             top: 61px;
             bottom: 0;
             width: 350px;
+            min-width: 300px;
+            max-width: 700px;
             background: #1a1a1a;
             border-left: 2px solid #333;
             padding: 15px;
@@ -88,6 +90,7 @@
             transform: translateX(100%);
             transition: transform 0.3s ease;
             z-index: 200;
+            resize: horizontal;
         }
         .debug-panel.open {
             transform: translateX(0);
@@ -148,6 +151,8 @@
             top: 61px;
             bottom: 0;
             width: 300px;
+            min-width: 250px;
+            max-width: 600px;
             background: #1a1a1a;
             border-right: 2px solid #333;
             padding: 15px;
@@ -155,9 +160,23 @@
             transform: translateX(-100%);
             transition: transform 0.3s ease;
             z-index: 200;
+            resize: horizontal;
         }
         .config-panel.open {
             transform: translateX(0);
+        }
+        .panel-resize-handle {
+            position: absolute;
+            top: 0;
+            right: 0;
+            width: 5px;
+            height: 100%;
+            cursor: ew-resize;
+            background: transparent;
+            z-index: 10;
+        }
+        .panel-resize-handle:hover {
+            background: rgba(77, 166, 255, 0.3);
         }
         .config-panel h3 {
             margin-top: 0;
@@ -210,6 +229,103 @@
             margin-top: 10px;
             background: #4da6ff;
             padding: 10px;
+        }
+        .collapsible-header {
+            cursor: pointer;
+            user-select: none;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 10px;
+            background: #333;
+            border-radius: 4px;
+            margin-bottom: 10px;
+        }
+        .collapsible-header:hover {
+            background: #3a3a3a;
+        }
+        .collapsible-header h4 {
+            margin: 0;
+            color: #70baff;
+            font-size: 14px;
+        }
+        .collapsible-arrow {
+            transition: transform 0.2s;
+            color: #70baff;
+        }
+        .collapsible-arrow.collapsed {
+            transform: rotate(-90deg);
+        }
+        .collapsible-content {
+            max-height: 1000px;
+            overflow: hidden;
+            transition: max-height 0.3s ease;
+        }
+        .collapsible-content.collapsed {
+            max-height: 0;
+        }
+        .bucket-row {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            margin: 8px 0;
+            padding: 8px;
+            background: #1a1a1a;
+            border-radius: 3px;
+        }
+        .bucket-color-preview {
+            width: 30px;
+            height: 30px;
+            border-radius: 3px;
+            border: 1px solid #555;
+        }
+        .bucket-name {
+            flex: 1;
+            min-width: 60px;
+            background: #0d0d0d;
+            border: 1px solid #555;
+            color: #eee;
+            padding: 6px;
+            border-radius: 3px;
+            font-size: 12px;
+        }
+        .bucket-threshold {
+            width: 80px;
+            background: #0d0d0d;
+            border: 1px solid #555;
+            color: #eee;
+            padding: 6px;
+            border-radius: 3px;
+            font-size: 12px;
+        }
+        .bucket-remove-btn {
+            width: 30px;
+            height: 30px;
+            background: #d44;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 16px;
+            color: white;
+            padding: 0;
+            margin: 0;
+        }
+        .bucket-remove-btn:hover {
+            background: #f55;
+        }
+        .bucket-add-btn {
+            width: 100%;
+            margin-top: 10px;
+            background: #4d4;
+            border: none;
+            padding: 8px;
+            border-radius: 3px;
+            cursor: pointer;
+            font-weight: bold;
+            color: white;
+        }
+        .bucket-add-btn:hover {
+            background: #5e5;
         }
 
         .minimap {
@@ -283,8 +399,10 @@
     <canvas id="gridCanvas"></canvas>
 
     <div class="config-panel" id="configPanel">
+        <div class="panel-resize-handle" id="configResizeHandle"></div>
         <h3>Map Configuration</h3>
 
+        <!-- Live Preview (Always visible at top) -->
         <div class="config-section">
             <h4>Live Preview</h4>
             <div style="text-align: center; margin-bottom: 10px;">
@@ -293,42 +411,63 @@
             <small style="color: #888; display: block; text-align: center;">Adjust settings below to see changes in real-time</small>
         </div>
 
+        <!-- Map Generation Settings (Collapsible) -->
         <div class="config-section">
-            <h4>Map Generation</h4>
-
-            <div class="config-input-group">
-                <label>Map Size (Width × Height)</label>
-                <input type="number" id="configMapSize" min="1" max="500" value="100">
+            <div class="collapsible-header" id="mapGenHeader">
+                <h4>Map Generation</h4>
+                <span class="collapsible-arrow">▼</span>
             </div>
-
-            <div class="config-input-group">
-                <label>Noise Scale (Combined): <span class="range-value" id="scaleTotalValue">0.01500</span></label>
-                <small style="color: #888; display: block; margin-bottom: 8px;">Lower = larger continents, Higher = fine detail</small>
-
-                <label style="font-size: 11px; margin-top: 5px;">Macro (0 - 0.5): <span class="range-value" id="scaleMacroValue">0.00</span></label>
-                <input type="range" id="configScaleMacro" min="0" max="0.5" step="0.01" value="0">
-
-                <label style="font-size: 11px; margin-top: 5px;">Mid (0 - 0.1): <span class="range-value" id="scaleMidValue">0.015</span></label>
-                <input type="range" id="configScaleMid" min="0" max="0.1" step="0.001" value="0.015">
-
-                <label style="font-size: 11px; margin-top: 5px;">Micro (0 - 0.01): <span class="range-value" id="scaleMicroValue">0.0000</span></label>
-                <input type="range" id="configScaleMicro" min="0" max="0.01" step="0.0001" value="0">
-            </div>
-
-            <div class="config-input-group">
-                <label>Seed</label>
-                <div style="display: flex; gap: 5px;">
-                    <input type="text" id="configSeed" placeholder="Random" style="flex: 1;">
-                    <button id="btnRandomSeed" style="width: auto; padding: 6px 12px; margin: 0;">🎲</button>
+            <div class="collapsible-content" id="mapGenContent">
+                <div class="config-input-group">
+                    <label>Map Size (Width × Height)</label>
+                    <input type="number" id="configMapSize" min="1" max="500" value="100">
                 </div>
-                <small style="color: #888;">Leave empty or click 🎲 for random</small>
-            </div>
 
-            <button class="config-apply-btn" id="btnApplyConfig">Apply & Generate Full Map</button>
+                <div class="config-input-group">
+                    <label>Noise Scale (Combined): <span class="range-value" id="scaleTotalValue">0.01500</span></label>
+                    <small style="color: #888; display: block; margin-bottom: 8px;">Lower = larger continents, Higher = fine detail</small>
+
+                    <label style="font-size: 11px; margin-top: 5px;">Macro (0 - 0.5): <span class="range-value" id="scaleMacroValue">0.00</span></label>
+                    <input type="range" id="configScaleMacro" min="0" max="0.5" step="0.01" value="0">
+
+                    <label style="font-size: 11px; margin-top: 5px;">Mid (0 - 0.1): <span class="range-value" id="scaleMidValue">0.015</span></label>
+                    <input type="range" id="configScaleMid" min="0" max="0.1" step="0.001" value="0.015">
+
+                    <label style="font-size: 11px; margin-top: 5px;">Micro (0 - 0.01): <span class="range-value" id="scaleMicroValue">0.0000</span></label>
+                    <input type="range" id="configScaleMicro" min="0" max="0.01" step="0.0001" value="0">
+                </div>
+
+                <div class="config-input-group">
+                    <label>Seed</label>
+                    <div style="display: flex; gap: 5px;">
+                        <input type="text" id="configSeed" placeholder="Random" style="flex: 1;">
+                        <button id="btnRandomSeed" style="width: auto; padding: 6px 12px; margin: 0;">🎲</button>
+                    </div>
+                    <small style="color: #888;">Leave empty or click 🎲 for random</small>
+                </div>
+            </div>
         </div>
+
+        <!-- Terrain Buckets (Collapsible) -->
+        <div class="config-section">
+            <div class="collapsible-header" id="bucketsHeader">
+                <h4>Terrain Buckets</h4>
+                <span class="collapsible-arrow collapsed">▼</span>
+            </div>
+            <div class="collapsible-content collapsed" id="bucketsContent">
+                <small style="color: #888; display: block; margin-bottom: 10px;">Configure terrain types and their noise thresholds (-1.0 to 1.0)</small>
+                <div id="bucketsList">
+                    <!-- Bucket inputs will be dynamically generated here -->
+                </div>
+                <button class="bucket-add-btn" id="btnAddBucket">+ Add Terrain Bucket</button>
+            </div>
+        </div>
+
+        <button class="config-apply-btn" id="btnApplyConfig">Apply & Generate Full Map</button>
     </div>
 
     <div class="debug-panel" id="debugPanel">
+        <div class="panel-resize-handle" id="debugResizeHandle"></div>
         <button class="close-btn" id="closeDebug">Close</button>
         <h3>Tile Debug Info</h3>
         <div id="debugContent">
