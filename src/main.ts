@@ -719,34 +719,53 @@ class DualGridSystem {
             visibleTilesY = canvasHeight / (scaledTileHeight) * 2.0;
         }
         
-        // Calculate viewport box corners in grid coordinates
-        const viewportGridLeft = centerGridX - visibleTilesX / 2;
-        const viewportGridTop = centerGridY - visibleTilesY / 2;
-        
-        // Convert to minimap pixel coordinates
-        const viewportMinimapX = viewportGridLeft * pixelWidth;
-        const viewportMinimapY = viewportGridTop * pixelHeight;
-        const viewportMinimapWidth = visibleTilesX * pixelWidth;
-        const viewportMinimapHeight = visibleTilesY * pixelHeight;
-        
-        // Draw viewport box
+        // Draw viewport indicator
         ctx.strokeStyle = '#ffff00';
         ctx.lineWidth = 2;
-        ctx.strokeRect(
-            viewportMinimapX,
-            viewportMinimapY,
-            viewportMinimapWidth,
-            viewportMinimapHeight
-        );
-        
-        // Draw semi-transparent fill
         ctx.fillStyle = 'rgba(255, 255, 0, 0.1)';
-        ctx.fillRect(
-            viewportMinimapX,
-            viewportMinimapY,
-            viewportMinimapWidth,
-            viewportMinimapHeight
-        );
+
+        if (this.renderMode === RenderMode.OrthographicColored) {
+            // Draw rectangle for orthographic view
+            const viewportGridLeft = centerGridX - visibleTilesX / 2;
+            const viewportGridTop = centerGridY - visibleTilesY / 2;
+
+            const viewportMinimapX = viewportGridLeft * pixelWidth;
+            const viewportMinimapY = viewportGridTop * pixelHeight;
+            const viewportMinimapWidth = visibleTilesX * pixelWidth;
+            const viewportMinimapHeight = visibleTilesY * pixelHeight;
+
+            ctx.strokeRect(
+                viewportMinimapX,
+                viewportMinimapY,
+                viewportMinimapWidth,
+                viewportMinimapHeight
+            );
+
+            ctx.fillRect(
+                viewportMinimapX,
+                viewportMinimapY,
+                viewportMinimapWidth,
+                viewportMinimapHeight
+            );
+        } else {
+            // Draw diamond for isometric view
+            // In isometric, the viewport is diamond-shaped in grid space
+            // Diamond corners: top, right, bottom, left
+            const centerMinimapX = centerGridX * pixelWidth;
+            const centerMinimapY = centerGridY * pixelHeight;
+            const halfWidth = (visibleTilesX / 2) * pixelWidth;
+            const halfHeight = (visibleTilesY / 2) * pixelHeight;
+
+            ctx.beginPath();
+            ctx.moveTo(centerMinimapX, centerMinimapY - halfHeight);  // Top
+            ctx.lineTo(centerMinimapX + halfWidth, centerMinimapY);   // Right
+            ctx.lineTo(centerMinimapX, centerMinimapY + halfHeight);  // Bottom
+            ctx.lineTo(centerMinimapX - halfWidth, centerMinimapY);   // Left
+            ctx.closePath();
+
+            ctx.fill();
+            ctx.stroke();
+        }
     }
 }
 
