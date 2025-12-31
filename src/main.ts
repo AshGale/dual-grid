@@ -137,6 +137,7 @@ class DualGridSystem {
     public showTransitionLayer: boolean = true;
     public showWorldGrid: boolean = false;
     public showDualGrid: boolean = false;
+    public showMinimap: boolean = false;
     private debugTileX: number = -1;
     private debugTileY: number = -1;
 
@@ -624,6 +625,129 @@ class DualGridSystem {
         // Restore context state (undo zoom transformation)
         ctx.restore();
     }
+    
+    public renderMinimap(ctx: CanvasRenderingContext2D, width: number, height: number, canvasWidth: number, canvasHeight: number) {
+        // Clear minimap
+        ctx.fillStyle = '#0d0d0d';
+        ctx.fillRect(0, 0, width, height);
+        
+        if (!assetsLoaded) return;
+        
+        // Calculate pixel size for each grid cell
+        const pixelWidth = width / this.width;
+        const pixelHeight = height / this.height;
+        
+        // Terrain colors for minimap
+        const terrainColors: Record<TerrainType, string> = {
+            [TerrainType.Water]: '#4da6ff',
+            [TerrainType.Sand]: '#ffcc66',
+            [TerrainType.Dirt]: '#cc8855',
+            [TerrainType.Grass]: '#66dd66'
+        };
+        
+        // Draw each cell as a colored pixel
+        for (let y = 0; y < this.height; y++) {
+            for (let x = 0; x < this.width; x++) {
+                const terrain = this.getCell(x, y);
+                ctx.fillStyle = terrainColors[terrain];
+                ctx.fillRect(
+                    Math.floor(x * pixelWidth),
+                    Math.floor(y * pixelHeight),
+                    Math.ceil(pixelWidth),
+                    Math.ceil(pixelHeight)
+                );
+            }
+        }
+        
+        // Draw viewport indicator box
+        let centerGridX: number;
+        let centerGridY: number;
+        let visibleTilesX: number;
+        let visibleTilesY: number;
+
+        if (this.renderMode === RenderMode.OrthographicColored) {
+            // ORTHOGRAPHIC MODE - simple direct calculation
+            // Origin is at center of canvas, offset by camera
+            const originX = canvasWidth / 2 + this.cameraOffsetX;
+            const originY = canvasHeight / 2 + this.cameraOffsetY;
+
+            // Tile size in orthographic mode
+            const orthoTileSize = 40;
+
+            // Top-left corner of viewport in screen space is at (0, 0)
+            // Convert to grid coordinates
+            const viewportLeft = -originX / (orthoTileSize * this.zoomLevel);
+            const viewportTop = -originY / (orthoTileSize * this.zoomLevel);
+
+            // How many tiles fit in the viewport
+            visibleTilesX = canvasWidth / (orthoTileSize * this.zoomLevel);
+            visibleTilesY = canvasHeight / (orthoTileSize * this.zoomLevel);
+
+            // Center is at the middle of the viewport
+            centerGridX = viewportLeft + visibleTilesX / 2;
+            centerGridY = viewportTop + visibleTilesY / 2;
+        } else {
+            // ISOMETRIC MODE - requires inverse transformation
+            // Use the same logic as screenToGrid function
+
+            const originX = canvasWidth / 2 + this.cameraOffsetX;
+            const originY = canvasHeight / 2 + this.cameraOffsetY;
+
+            // Find the grid coordinates of the viewport center (center of screen)
+            // Center of screen is at (canvasWidth/2, canvasHeight/2)
+            const centerScreenX = canvasWidth / 2;
+            const centerScreenY = canvasHeight / 2;
+
+            // Convert to position relative to origin
+            const relX = centerScreenX - originX;
+            const relY = centerScreenY - originY;
+
+            // Apply inverse isometric transformation (accounting for zoom)
+            // Original projection: drawX = (gridX - gridY) * (TILE_WIDTH/2), drawY = (gridX + gridY) * (TILE_HEIGHT/2)
+            // Inverse: gridX = (relX/(TILE_WIDTH/2) + relY/(TILE_HEIGHT/2)) / 2
+            //          gridY = (relY/(TILE_HEIGHT/2) - relX/(TILE_WIDTH/2)) / 2
+            const scaledTileWidth = TILE_WIDTH * this.zoomLevel;
+            const scaledTileHeight = TILE_HEIGHT * this.zoomLevel;
+
+            centerGridX = (relX / (scaledTileWidth / 2) + relY / (scaledTileHeight / 2)) / 2;
+            centerGridY = (relY / (scaledTileHeight / 2) - relX / (scaledTileWidth / 2)) / 2;
+
+            // Calculate visible area - approximate based on screen dimensions
+            // In isometric view, we see roughly a diamond-shaped area
+            // Approximate with a rectangle that's larger to account for diamond shape
+            visibleTilesX = canvasWidth / (scaledTileWidth) * 2.0;
+            visibleTilesY = canvasHeight / (scaledTileHeight) * 2.0;
+        }
+        
+        // Calculate viewport box corners in grid coordinates
+        const viewportGridLeft = centerGridX - visibleTilesX / 2;
+        const viewportGridTop = centerGridY - visibleTilesY / 2;
+        
+        // Convert to minimap pixel coordinates
+        const viewportMinimapX = viewportGridLeft * pixelWidth;
+        const viewportMinimapY = viewportGridTop * pixelHeight;
+        const viewportMinimapWidth = visibleTilesX * pixelWidth;
+        const viewportMinimapHeight = visibleTilesY * pixelHeight;
+        
+        // Draw viewport box
+        ctx.strokeStyle = '#ffff00';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(
+            viewportMinimapX,
+            viewportMinimapY,
+            viewportMinimapWidth,
+            viewportMinimapHeight
+        );
+        
+        // Draw semi-transparent fill
+        ctx.fillStyle = 'rgba(255, 255, 0, 0.1)';
+        ctx.fillRect(
+            viewportMinimapX,
+            viewportMinimapY,
+            viewportMinimapWidth,
+            viewportMinimapHeight
+        );
+    }
 }
 
 // --- APP SETUP ---
@@ -642,6 +766,12 @@ resizeCanvas();
 const grid = new DualGridSystem(GRID_SIZE, GRID_SIZE);
 grid.generatePerlinMap();
 
+// Minimap setup
+const minimapCanvas = document.getElementById('minimapCanvas') as HTMLCanvasElement;
+const minimapCtx = minimapCanvas.getContext('2d')!;
+minimapCanvas.width = 250;
+minimapCanvas.height = 250;
+
 // --- LOOP ---
 function loop() {
     // Background
@@ -650,6 +780,12 @@ function loop() {
 
     if (assetsLoaded) {
         grid.render(ctx, canvas.width, canvas.height);
+        
+        // Render minimap if open
+        const minimap = document.getElementById('minimap')!;
+        if (minimap.classList.contains('open')) {
+            grid.renderMinimap(minimapCtx, minimapCanvas.width, minimapCanvas.height, canvas.width, canvas.height);
+        }
     } else {
         // Show loading message
         ctx.fillStyle = "#eee";
@@ -747,6 +883,23 @@ chkDualGrid.addEventListener('change', () => {
     console.log("Dual grid:", grid.showDualGrid);
 });
 
+// Minimap toggle
+const minimap = document.getElementById('minimap')!;
+const btnMinimap = document.getElementById('btnMinimap')!;
+
+btnMinimap.addEventListener('click', () => {
+    minimap.classList.toggle('open');
+});
+
+// Keyboard shortcut for minimap (M key)
+window.addEventListener('keydown', (e) => {
+    if (e.key === 'm' || e.key === 'M') {
+        // Don't trigger if typing in an input field
+        if (document.activeElement?.tagName === 'INPUT') return;
+        minimap.classList.toggle('open');
+    }
+});
+
 // Handle resize
 window.addEventListener('resize', () => {
     resizeCanvas();
@@ -795,37 +948,6 @@ canvas.addEventListener('mouseup', (e) => {
 
 canvas.addEventListener('mouseleave', () => {
     isDragging = false;
-});
-
-// Mouse wheel zoom
-canvas.addEventListener('wheel', (e) => {
-    e.preventDefault();
-    
-    const zoomFactor = 0.1;
-    const delta = e.deltaY > 0 ? -zoomFactor : zoomFactor;
-    
-    // Calculate new zoom level with limits
-    const newZoom = Math.max(0.1, Math.min(5.0, grid.zoomLevel + delta));
-    
-    // Get mouse position relative to canvas
-    const rect = canvas.getBoundingClientRect();
-    const mouseX = e.clientX - rect.left;
-    const mouseY = e.clientY - rect.top;
-    
-    // Calculate world position before zoom
-    const worldXBefore = (mouseX - canvas.width / 2 - grid.cameraOffsetX) / grid.zoomLevel;
-    const worldYBefore = (mouseY - canvas.height / 2 - grid.cameraOffsetY) / grid.zoomLevel;
-    
-    // Update zoom
-    grid.zoomLevel = newZoom;
-    
-    // Calculate world position after zoom
-    const worldXAfter = (mouseX - canvas.width / 2 - grid.cameraOffsetX) / grid.zoomLevel;
-    const worldYAfter = (mouseY - canvas.height / 2 - grid.cameraOffsetY) / grid.zoomLevel;
-    
-    // Adjust camera to keep mouse point fixed
-    grid.cameraOffsetX += (worldXAfter - worldXBefore) * grid.zoomLevel;
-    grid.cameraOffsetY += (worldYAfter - worldYBefore) * grid.zoomLevel;
 });
 
 // --- DEBUG PANEL ---
