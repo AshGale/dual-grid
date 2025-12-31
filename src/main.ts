@@ -23,7 +23,8 @@ enum TerrainType {
     Water = 0,
     Sand = 1,
     Dirt = 2,
-    Grass = 3
+    Grass = 3,
+    Stone = 4
 }
 
 enum RenderMode {
@@ -73,8 +74,15 @@ const DEFAULT_BUCKETS: TerrainBucket[] = [
     { name: 'Water', color: '#225588', threshold: -1.0, terrainType: TerrainType.Water },
     { name: 'Sand', color: '#eebb44', threshold: -0.2, terrainType: TerrainType.Sand },
     { name: 'Dirt', color: '#885533', threshold: 0.0, terrainType: TerrainType.Dirt },
-    { name: 'Grass', color: '#44aa44', threshold: 0.3, terrainType: TerrainType.Grass }
+    { name: 'Grass', color: '#44aa44', threshold: 0.3, terrainType: TerrainType.Grass },
+    { name: 'Stones', color: '#999999', threshold: 0.6, terrainType: TerrainType.Stone }
 ];
+
+// Generate transition layer order from buckets (skip first/lowest terrain which is always the base)
+// This array is automatically derived from DEFAULT_BUCKETS and sorted by threshold
+const TRANSITION_LAYER_ORDER: TerrainType[] = DEFAULT_BUCKETS
+    .slice(1) // Skip the first (lowest) terrain - it's always the base layer
+    .map(bucket => bucket.terrainType);
 
 // --- DEBUG SYSTEM ---
 interface TileDebugInfo {
@@ -106,8 +114,10 @@ let selectedTileDebugInfo: TileDebugInfo | null = null;
 // --- ASSET LOADING FUNCTIONS ---
 async function loadTerrainAssets(): Promise<void> {
     console.log("Starting to load terrain assets...");
-    const terrainNames = ['water', 'sand', 'dirt', 'grass'];
-    const promises = terrainNames.map(async (name, index) => {
+    // Derive terrain names from DEFAULT_BUCKETS to support dynamic terrain types
+    const promises = DEFAULT_BUCKETS.map(async (bucket) => {
+        const name = bucket.name.toLowerCase();
+        const terrainType = bucket.terrainType;
         console.log(`Loading ${name}...`);
 
         // Load image
@@ -139,13 +149,13 @@ async function loadTerrainAssets(): Promise<void> {
             });
         }
 
-        terrainAssets.set(index as TerrainType, {
+        terrainAssets.set(terrainType, {
             image: img,
             wangData,
             roleToId
         });
 
-        console.log(`${name} assets stored at index ${index}`);
+        console.log(`${name} assets stored for terrain type ${terrainType}`);
     });
 
     await Promise.all(promises);
@@ -313,8 +323,7 @@ class DualGridSystem {
         }
 
         // Calculate transition layers
-        const layerOrder = [TerrainType.Sand, TerrainType.Dirt, TerrainType.Grass];
-        for (const currentLayer of layerOrder) {
+        for (const currentLayer of TRANSITION_LAYER_ORDER) {
             // Wang tile bitmask - each bit represents a visual corner:
             // Bit 1 = Top visual corner (tl)
             // Bit 2 = Right visual corner (tr)
@@ -426,9 +435,7 @@ class DualGridSystem {
         // Each layer "splats" onto lower layers, creating natural coastlines
         // Skip Water (0) since it's already the base layer
         if (this.showTransitionLayer) {
-            const layerOrder = [TerrainType.Sand, TerrainType.Dirt, TerrainType.Grass];
-
-            for (const currentLayer of layerOrder) {
+            for (const currentLayer of TRANSITION_LAYER_ORDER) {
                 for (let y = 0; y < this.height - 1; y++) {
                     for (let x = 0; x < this.width - 1; x++) {
                         // Map grid positions to visual isometric corners
@@ -824,9 +831,7 @@ class DualGridSystem {
 
         // PASS 2: TRANSITION TILES
         if (this.showTransitionLayer) {
-            const layerOrder = [TerrainType.Sand, TerrainType.Dirt, TerrainType.Grass];
-
-            for (const currentLayer of layerOrder) {
+            for (const currentLayer of TRANSITION_LAYER_ORDER) {
                 for (let y = 0; y < this.height - 1; y++) {
                     for (let x = 0; x < this.width - 1; x++) {
                         const tl = this.getCell(x, y);
@@ -1136,9 +1141,25 @@ function loop() {
     requestAnimationFrame(loop);
 }
 
+// Generate dynamic CSS for terrain colors
+function generateTerrainCSS(): void {
+    const style = document.createElement('style');
+    style.id = 'dynamic-terrain-styles';
+
+    const css = DEFAULT_BUCKETS.map(bucket => {
+        const className = `terrain-${bucket.name.toLowerCase()}`;
+        return `.${className} { color: ${bucket.color}; }`;
+    }).join('\n        ');
+
+    style.textContent = css;
+    document.head.appendChild(style);
+    console.log("Dynamic terrain CSS generated for:", DEFAULT_BUCKETS.map(b => b.name).join(', '));
+}
+
 // Start loading assets and begin render loop
 loadTerrainAssets().then(() => {
     console.log("All terrain assets loaded!");
+    generateTerrainCSS(); // Generate CSS dynamically from buckets
 }).catch(err => {
     console.error("Failed to load assets:", err);
 });
@@ -1434,11 +1455,13 @@ function screenToGrid(screenX: number, screenY: number): { x: number; y: number 
 }
 
 function getTerrainName(terrain: TerrainType): string {
-    return ['Water', 'Sand', 'Dirt', 'Grass'][terrain];
+    const bucket = DEFAULT_BUCKETS.find(b => b.terrainType === terrain);
+    return bucket?.name ?? `Unknown Terrain ${terrain}`;
 }
 
 function getTerrainClass(terrain: TerrainType): string {
-    return ['terrain-water', 'terrain-sand', 'terrain-dirt', 'terrain-grass'][terrain];
+    const bucket = DEFAULT_BUCKETS.find(b => b.terrainType === terrain);
+    return bucket ? `terrain-${bucket.name.toLowerCase()}` : 'terrain-unknown';
 }
 
 function formatBitmask(role: number): string {
@@ -1571,7 +1594,8 @@ bucketsHeader.addEventListener('click', () => {
 let currentBuckets: TerrainBucket[] = [...DEFAULT_BUCKETS];
 
 // Next available terrain type ID (for dynamically created terrains)
-let nextTerrainTypeId = 4; // Start after Water(0), Sand(1), Dirt(2), Grass(3)
+// Automatically calculated from DEFAULT_BUCKETS
+let nextTerrainTypeId = Math.max(...DEFAULT_BUCKETS.map(b => b.terrainType)) + 1;
 
 // Generate bucket UI controls
 function generateBucketInputs() {
