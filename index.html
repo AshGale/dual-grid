@@ -272,6 +272,7 @@
             padding: 8px;
             background: #1a1a1a;
             border-radius: 3px;
+            flex-wrap: wrap;
         }
         .bucket-color-preview {
             width: 30px;
@@ -326,6 +327,29 @@
         }
         .bucket-add-btn:hover {
             background: #5e5;
+        }
+        .bucket-texture-btn {
+            padding: 6px 10px;
+            background: #555;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 11px;
+            color: white;
+            white-space: nowrap;
+            margin: 0;
+        }
+        .bucket-texture-btn:hover {
+            background: #666;
+        }
+        .bucket-texture-btn.loaded {
+            background: #4d4;
+        }
+        .bucket-texture-btn.loaded:hover {
+            background: #5e5;
+        }
+        .bucket-texture-input {
+            display: none;
         }
 
         .minimap {

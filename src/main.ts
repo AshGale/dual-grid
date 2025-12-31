@@ -1,9 +1,20 @@
 import { createNoise2D } from 'simplex-noise';
 
 // --- CONFIGURATION ---
-const TILE_WIDTH = 64;   // Width of the tile in pixels
-const TILE_HEIGHT = 32;  // Height (usually half width for standard ISO)
+// TILE SIZE CONFIGURATION
+// These values define the isometric tile dimensions for rendering
+// Current setup: Standard 2:1 ratio isometric tiles (64x32)
+// FUTURE: These could be made configurable per-terrain or globally via UI
+const TILE_WIDTH = 64;   // Width of the tile in pixels (default: 64 for standard isometric)
+const TILE_HEIGHT = 32;  // Height (usually half width for standard ISO) (default: 32)
 const GRID_SIZE = 100;   // Size of the data grid (100x100)
+
+// TEXTURE ATLAS CONFIGURATION
+// Custom Wang tile textures are expected to be in atlas format:
+// - 15 tile variants (roles 1-15) arranged in rows
+// - Default layout: 8 tiles per row (512px wide for 64px tiles)
+// - 2 rows total (64px tall for 32px tiles)
+// FUTURE: Support for custom atlas layouts and tile counts
 
 const noise2D = createNoise2D();
 
@@ -26,6 +37,8 @@ interface TerrainBucket {
     color: string;
     threshold: number; // Minimum noise value for this terrain
     terrainType: TerrainType; // Maps to asset loading if available
+    customTexture?: File; // Optional custom texture file
+    customTextureLoaded?: boolean; // Track if custom texture is loaded
 }
 
 interface MapConfig {
@@ -138,6 +151,91 @@ async function loadTerrainAssets(): Promise<void> {
     await Promise.all(promises);
     assetsLoaded = true;
     console.log("All assets loaded! assetsLoaded =", assetsLoaded);
+}
+
+// Load custom texture from a File object
+async function loadCustomTexture(file: File, terrainType: TerrainType): Promise<void> {
+    console.log(`Loading custom texture for terrain ${terrainType}:`, file.name);
+
+    // Validate file is a PNG
+    if (!file.type.startsWith('image/')) {
+        throw new Error('File must be an image (PNG recommended)');
+    }
+
+    // Create image from file
+    const img = new Image();
+    const imgPromise = new Promise<void>((resolve, reject) => {
+        img.onload = () => {
+            console.log(`Custom texture loaded: ${file.name} (${img.width}x${img.height})`);
+
+            // Validate dimensions (should be multiple of tile size for proper atlas)
+            // For now, we assume 64x32 isometric tiles in an atlas (8 tiles per row, 2 rows = 512x64)
+            if (img.width % TILE_WIDTH !== 0 || img.height % TILE_HEIGHT !== 0) {
+                console.warn(`Custom texture dimensions (${img.width}x${img.height}) may not align with tile size (${TILE_WIDTH}x${TILE_HEIGHT})`);
+            }
+
+            resolve();
+        };
+        img.onerror = (e) => {
+            console.error(`Failed to load custom texture:`, e);
+            reject(new Error('Failed to load image file'));
+        };
+    });
+
+    // Convert File to data URL
+    const reader = new FileReader();
+    const readerPromise = new Promise<void>((resolve, reject) => {
+        reader.onload = (e) => {
+            img.src = e.target?.result as string;
+            resolve();
+        };
+        reader.onerror = () => reject(new Error('Failed to read file'));
+    });
+    reader.readAsDataURL(file);
+
+    await readerPromise;
+    await imgPromise;
+
+    // Generate Wang data with the standard mapping used by all built-in terrains
+    // This matches the exact mapping in water.txt, sand.txt, dirt.txt, grass.txt
+    const defaultWangData: WangTileData = {
+        tile_width: TILE_WIDTH,
+        tile_height: TILE_HEIGHT,
+        wang_sets: [{
+            members: [
+                { id: 0, role: 4 },
+                { id: 1, role: 6 },
+                { id: 2, role: 2 },
+                { id: 3, role: 12 },
+                { id: 4, role: 15 },
+                { id: 5, role: 3 },
+                { id: 6, role: 8 },
+                { id: 7, role: 9 },
+                { id: 8, role: 1 },
+                { id: 9, role: 11 },
+                { id: 10, role: 13 },
+                { id: 11, role: 5 },
+                { id: 12, role: 7 },
+                { id: 13, role: 14 },
+                { id: 14, role: 10 }
+            ]
+        }]
+    };
+
+    // Build role-to-id lookup map
+    const roleToId = new Map<number, number>();
+    defaultWangData.wang_sets[0].members.forEach(member => {
+        roleToId.set(member.role, member.id);
+    });
+
+    // Update or create terrain assets
+    terrainAssets.set(terrainType, {
+        image: img,
+        wangData: defaultWangData,
+        roleToId
+    });
+
+    console.log(`Custom texture loaded for terrain ${terrainType}`);
 }
 
 // --- DUAL GRID SYSTEM ---
@@ -1482,6 +1580,7 @@ function generateBucketInputs() {
     currentBuckets.forEach((bucket, index) => {
         const row = document.createElement('div');
         row.className = 'bucket-row';
+        row.style.flexWrap = 'wrap';
 
         // Color preview
         const colorPreview = document.createElement('div');
@@ -1556,10 +1655,51 @@ function generateBucketInputs() {
             }
         });
 
+        // Texture upload button
+        const textureBtn = document.createElement('button');
+        textureBtn.className = 'bucket-texture-btn';
+        textureBtn.textContent = bucket.customTextureLoaded ? '✓ Texture' : '📁 Texture';
+        textureBtn.title = 'Upload custom Wang tile texture (PNG)';
+        textureBtn.dataset.bucketIndex = index.toString();
+        if (bucket.customTextureLoaded) {
+            textureBtn.classList.add('loaded');
+        }
+
+        // Hidden file input
+        const fileInput = document.createElement('input');
+        fileInput.type = 'file';
+        fileInput.accept = 'image/png,image/jpeg,image/jpg,image/webp';
+        fileInput.className = 'bucket-texture-input';
+        fileInput.dataset.bucketIndex = index.toString();
+        fileInput.addEventListener('change', async (e) => {
+            const target = e.target as HTMLInputElement;
+            const idx = parseInt(target.dataset.bucketIndex!);
+            const file = target.files?.[0];
+
+            if (file) {
+                try {
+                    await loadCustomTexture(file, currentBuckets[idx].terrainType);
+                    currentBuckets[idx].customTexture = file;
+                    currentBuckets[idx].customTextureLoaded = true;
+                    generateBucketInputs(); // Refresh UI to show loaded state
+                    console.log(`Custom texture loaded for ${currentBuckets[idx].name}`);
+                } catch (err) {
+                    alert(`Failed to load texture: ${err instanceof Error ? err.message : 'Unknown error'}`);
+                    console.error('Texture load error:', err);
+                }
+            }
+        });
+
+        textureBtn.addEventListener('click', () => {
+            fileInput.click();
+        });
+
         row.appendChild(colorPreview);
         row.appendChild(nameInput);
         row.appendChild(thresholdInput);
         row.appendChild(colorInput);
+        row.appendChild(textureBtn);
+        row.appendChild(fileInput);
         row.appendChild(removeBtn);
         bucketsList.appendChild(row);
     });
