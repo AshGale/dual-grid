@@ -12,10 +12,12 @@ This is an isometric terrain renderer that demonstrates dual-grid tile mapping w
 
 The core concept is a **dual grid** approach where each rendered tile is determined by the terrain types of its four corner cells:
 
-- **Data Grid**: A 30x30 array of terrain type values (Water, Sand, Dirt, Grass)
+- **Data Grid**: A configurable grid (default 100x100) of terrain type values
 - **Render Grid**: Each rendered tile samples 4 neighboring cells to determine which tile variant to draw
 
 This creates smooth terrain transitions where tiles automatically blend based on their neighbors, similar to Wang tiling or blob tiling systems.
+
+The system supports **dynamic terrain buckets** - you can configure any number of terrain types with custom names, colors, thresholds, and textures through the configuration panel.
 
 #### Critical: Isometric Corner Mapping
 
@@ -28,10 +30,10 @@ This creates smooth terrain transitions where tiles automatically blend based on
 - **Left (West)** → grid position `(x, y+1)`
 
 This mapping MUST be used consistently across:
-- Base layer rendering ([src/main.ts:288-291](src/main.ts))
-- Transition layer rendering ([src/main.ts:316-319](src/main.ts))
-- Debug info generation ([src/main.ts:175-178](src/main.ts))
-- Debug visualization dots ([src/main.ts:458-462](src/main.ts))
+- Base layer rendering (around [src/main.ts:420-425](src/main.ts))
+- Transition layer rendering (around [src/main.ts:448-451](src/main.ts))
+- Debug info generation (around [src/main.ts:301-304](src/main.ts))
+- Debug visualization dots (around [src/main.ts:591-595](src/main.ts))
 
 **Corner Variable Naming:**
 - `tl` = Top visual corner (North)
@@ -60,12 +62,29 @@ The renderer supports three projection modes (toggled via UI):
 
 ### Tile Assets
 
-The `/water/`, `/sand/`, `/dirt/`, and `/grass/` directories contain:
-- `*.png` - Isometric tile sprites (64×32px each)
-- `*.txt` - Wang tile metadata defining the 15 tile variants per terrain type
+Terrain assets are organized in `/public/` with one folder per terrain type. Current available terrains include:
+- `/shallow-water/` - Light blue water terrain
+- `/deep-water/` - Dark blue water terrain
+- `/sand/` - Sandy beach terrain
+- `/dirt/` - Brown dirt terrain
+- `/dirt-grass/` - Dirt mixed with grass
+- `/grass/` - Green grass terrain
+- `/forest-floor/` - Forest ground terrain
+- `/stones/` - Rocky stone terrain
+- `/muddy-grass/` - Muddy grass terrain
+
+Each terrain folder contains:
+- `<name>.png` - Isometric tile sprite atlas (512×64px: 8 tiles per row, 2 rows, 64×32px each)
+- `<name>.txt` - Wang tile metadata JSON defining the 15 tile variants per terrain type
+
+**Folder Naming Convention:**
+- Folder names must be lowercase with hyphens replacing spaces
+- Example: "Shallow Water" → `/shallow-water/`
+- The asset loading system automatically converts bucket names using `.toLowerCase().replace(/\s+/g, '-')`
 
 Wang tile roles (corner bitmask):
-- 0-15 representing all possible combinations of matching/non-matching corners
+- Roles 1-15 representing all possible combinations of matching/non-matching corners
+- Role 0 (no corners) is skipped during rendering
 - Used to select the correct tile variant based on neighboring terrain
 
 ## Development
@@ -105,19 +124,32 @@ npm run preview
 ### Key Constants
 
 Located at the top of [src/main.ts](src/main.ts):
-- `TILE_WIDTH = 64`: Isometric tile width
+- `TILE_WIDTH = 64`: Isometric tile width (configurable via comments for future UI support)
 - `TILE_HEIGHT = 32`: Isometric tile height (half of width for 2:1 ratio)
-- `GRID_SIZE = 30`: Data grid dimensions (30×30 cells)
+- `GRID_SIZE = 100`: Default data grid dimensions (100×100 cells, configurable in UI)
 
 ### Terrain Generation
 
-Perlin noise parameters in `generatePerlinMap()`:
-- `scale = 0.08`: Noise frequency (lower = larger landmasses)
-- Threshold values map noise (-1 to 1) to terrain types:
-  - `< -0.2`: Water
-  - `-0.2 to 0.0`: Sand
-  - `0.0 to 0.3`: Dirt
-  - `> 0.3`: Grass
+The system uses **Simplex noise** (not Perlin) for terrain generation with configurable parameters:
+
+**Default Terrain Buckets** (defined in `DEFAULT_BUCKETS`):
+- `Shallow Water`: threshold -1.0, color #225588 (TerrainType.Water = 0)
+- `Sand`: threshold -0.2, color #eebb44 (TerrainType.Sand = 1)
+- `Dirt`: threshold 0.0, color #885533 (TerrainType.Dirt = 2)
+- `Grass`: threshold 0.3, color #44aa44 (TerrainType.Grass = 3)
+
+**Noise Scale Configuration:**
+The scale is split into three components (configurable in UI):
+- **Macro scale**: Large-scale continent formation (0-1.00, step 0.01)
+- **Mid scale**: Medium-scale terrain features (0-0.100, step 0.001)
+- **Micro scale**: Fine-detail noise (0-0.0100, step 0.0001)
+- **Total scale**: Sum of all three (default: 0.015)
+
+**Bucket System:**
+- Terrain buckets are sorted by threshold and checked from highest to lowest
+- Noise values (-1 to 1) are compared against thresholds to determine terrain type
+- Users can add/remove buckets and customize names, colors, thresholds, and textures dynamically
+- Each bucket maps to a `TerrainType` enum value for asset loading
 
 ## Code Structure
 
@@ -145,9 +177,22 @@ enum RenderMode {
 **MapConfig interface:**
 ```typescript
 interface MapConfig {
-    scale: number;      // Combined noise scale (sum of macro/mid/micro)
-    seed: number | null; // Optional seed for reproducibility
-    size: number;       // Grid dimensions (size × size)
+    scale: number;           // Combined noise scale (sum of macro/mid/micro)
+    seed: number | null;     // Optional seed for reproducibility
+    size: number;            // Grid dimensions (size × size)
+    buckets: TerrainBucket[]; // Array of terrain bucket configurations
+}
+```
+
+**TerrainBucket interface:**
+```typescript
+interface TerrainBucket {
+    name: string;              // Display name (e.g., "Shallow Water")
+    color: string;             // Hex color for rendering (e.g., "#225588")
+    threshold: number;         // Minimum noise value (-1.0 to 1.0)
+    terrainType: TerrainType;  // Maps to asset loading
+    customTexture?: File;      // Optional custom texture upload
+    customTextureLoaded?: boolean; // Track if custom texture is loaded
 }
 ```
 
@@ -155,14 +200,22 @@ interface MapConfig {
 
 The main class which handles:
 - Terrain data storage and access
-- Perlin noise map generation with configurable parameters
-- Dual-grid tile rendering logic with proper layering (Water → Sand → Dirt → Grass)
+- Simplex noise map generation with configurable parameters and dynamic buckets
+- Dual-grid tile rendering logic with proper layering (dynamically determined by bucket order)
 - Projection mode switching between three render modes
 - Camera offset for panning the map
-- Zoom level for scaling the view
+- Zoom level for scaling the view (default: 1.0)
 - Debug tile selection and info generation
-- Layer visibility controls
-- Minimap rendering
+- Layer visibility controls (base layer, transition layer, world grid, dual grid)
+- Minimap rendering with viewport indicators
+- Export to PNG image functionality
+
+**Key Methods:**
+- `generatePerlinMap(config: MapConfig)`: Generates terrain using Simplex noise and bucket thresholds
+- `render(ctx, canvasWidth, canvasHeight)`: Main rendering loop with zoom transformation
+- `getDebugInfo(x, y)`: Returns detailed tile information for debug panel
+- `renderMinimap(ctx, width, height, canvasWidth, canvasHeight)`: Renders minimap with viewport indicator
+- `exportToImage()`: Exports the full map as a PNG (with size limits to prevent browser crashes)
 
 ### Controls
 
@@ -171,10 +224,11 @@ The main class which handles:
 - **Click tile**: Select a tile and open the debug panel with detailed information
 
 **Buttons:**
-- **New Random Map**: Regenerate terrain with new Perlin noise
-- **Textured / Colored / Ortho**: Switch between the three render modes
+- **New Random Map**: Regenerate terrain with new Simplex noise and random seed
+- **Export Map**: Export the current map as a PNG image (with size validation)
+- **Textured / Colored / Ortho**: Switch between the three render modes (active button highlighted)
 - **Config**: Open the configuration panel to adjust map generation parameters
-- **Minimap**: Toggle the minimap overlay
+- **Minimap**: Toggle the minimap overlay (shows by default)
 
 **Keyboard Shortcuts:**
 - **M key**: Toggle minimap visibility
@@ -195,10 +249,12 @@ The renderer uses a **two-pass rendering system** with Wang tiling for smooth te
 - This ensures every tile has a solid background for transitions to layer on top
 
 #### Pass 2: Transition Layers
-- Draws partial tiles in priority order: Sand → Dirt → Grass
+- Draws partial tiles in **dynamic priority order** based on bucket configuration
+- Default order: Sand → Dirt → Grass (determined by bucket array order, skipping first/lowest bucket)
 - Each layer only draws where its terrain **actually exists** at the corners
 - Skips role 0 (no corners) and role 15 (full tiles, already in base layer)
 - This prevents phantom intermediate terrain from appearing
+- Order is determined by `getTransitionLayerOrder()` which skips the base (lowest) bucket
 
 #### Wang Tile Bitmask System
 
@@ -245,7 +301,8 @@ An interactive minimap shows a bird's-eye view of the entire terrain:
   - **Yellow diamond** in isometric mode
 - Viewport indicator adjusts for both camera offset and zoom level
 - Canvas size: 250×250 pixels
-- See [src/main.ts:626-766](src/main.ts) for implementation
+- Terrain colors are dynamically pulled from current bucket configuration
+- See [src/main.ts:941-1080](src/main.ts) for implementation
 
 **Viewport Calculation:**
 - Orthographic mode: Simple rectangle based on canvas dimensions and tile size
@@ -265,8 +322,25 @@ Advanced map generation settings accessible via the "Config" button:
 
 **Map Size:**
 - Adjustable from 1×1 to 500×500 grid cells
-- Default: 30×30
+- Default: 100×100
 - Changing size creates a new `DualGridSystem` instance with all settings preserved
+
+**Terrain Buckets (Dynamic Configuration):**
+- **Add Bucket** button: Create new terrain types dynamically
+- Each bucket has:
+  - **Color preview**: Visual indicator of the terrain color
+  - **Name input**: Terrain display name (converted to folder name via lowercase + hyphens)
+  - **Threshold input**: Noise value threshold (-1.0 to 1.0, step 0.1)
+  - **Color picker**: Choose terrain color
+  - **Texture button**: Upload custom Wang tile texture (PNG, 512×64px recommended)
+  - **Remove button**: Delete bucket (disabled if only 1 bucket remains)
+- Buckets are sorted by threshold and determine terrain generation order
+- Custom textures use the standard Wang tile mapping (same as built-in terrains)
+- Changes update the live preview minimap in real-time
+
+**Collapsible Sections:**
+- **Map Generation**: Scale sliders, map size, and seed controls
+- **Terrain Buckets**: Dynamic bucket management (add/edit/remove terrains)
 
 **Seed Control:**
 - Optional numeric seed for reproducible maps
@@ -274,12 +348,18 @@ Advanced map generation settings accessible via the "Config" button:
 - "Random Seed" button generates a random 6-digit number
 
 **Apply Behavior:**
-- Validates inputs (size 1-500, seed must be numeric)
+- Validates inputs (size 1-500, seed must be numeric or empty)
 - Rebuilds grid if size changed
-- Regenerates terrain with new parameters
+- Regenerates terrain with new bucket configuration
+- Updates global `currentBuckets` array
 - Closes panel automatically after applying
 
-See [src/main.ts:1127-1219](src/main.ts) for implementation.
+**Panel Features:**
+- Resizable via drag handle on the left edge (250-600px width)
+- Live preview minimap shows map changes as you adjust settings
+- Separate preview grid instance for performance
+
+See [src/main.ts:1562-1920](src/main.ts) for full implementation.
 
 ### Debug System
 
@@ -308,13 +388,19 @@ Comprehensive tile information displayed in a sliding panel:
 - Tile ID from Wang data
 
 **Transition Layers:**
-- One section per terrain layer (Sand, Dirt, Grass)
+- One section per terrain layer (dynamically determined by bucket configuration)
 - Shows which layers are drawn vs. skipped
 - Role bitmask with visual corner labels (TR/BR/BL/TL)
 - Tile ID from Wang data
 - Status explanation (drawn, skipped because no corners, or skipped because full tile)
+- Drawn layers have blue border, skipped layers have gray border
 
-See [src/main.ts:163-238](src/main.ts) for debug info generation and [src/main.ts:1047-1125](src/main.ts) for display logic.
+**Panel Features:**
+- Resizable via drag handle on the right edge (300-700px width)
+- Auto-opens when clicking a tile
+- Close button to dismiss
+
+See [src/main.ts:289-364](src/main.ts) for debug info generation and [src/main.ts:1482-1560](src/main.ts) for display logic.
 
 #### Debug Overlays
 
@@ -333,7 +419,7 @@ Two grid visualization modes (toggled via checkboxes):
 - In orthographic mode: Squares aligned with data grid
 - In isometric mode: Diamonds centered between 4 corner cells
 
-See [src/main.ts:343-422](src/main.ts) for implementation.
+See [src/main.ts:476-554](src/main.ts) for implementation.
 
 ### Layer Visibility Controls
 
@@ -389,7 +475,22 @@ const br = this.getCell(x, y + 1);      // Left visual corner
 **Cause**: Missing `ctx.save()` at the start of render or misplaced `ctx.restore()` in the rendering flow.
 
 **Solution**:
-- Ensure `ctx.save()` is called at the very start of the `render()` method ([src/main.ts:266](src/main.ts))
-- Ensure `ctx.restore()` is called only at the very end of the `render()` method ([src/main.ts:623](src/main.ts))
-- **CRITICAL**: `ctx.restore()` must NOT be inside the `drawTileByRole()` method - if it is, it will be called hundreds of times per frame and undo the zoom transform
-- The transform stack should be: save → apply zoom → render everything → restore
+- Ensure `ctx.save()` is called at the very start of the `render()` method (around [src/main.ts:400](src/main.ts))
+- The zoom transform is applied after save: translate → scale → translate back
+- **CRITICAL**: There should be NO `ctx.restore()` call in the main render method anymore
+- The `ctx.restore()` was incorrectly placed in `drawTileByRole()` and has been removed
+- Zoom is maintained across the entire render pipeline without needing restore
+
+### Export Size Limits
+
+**Symptom**: Export fails with alert about map being too large.
+
+**Cause**: Browser canvas size limitations (max 16384×16384px) or memory constraints (100 megapixels).
+
+**Solution**:
+- Check the estimated export dimensions shown in the error alert
+- Reduce map size in configuration panel:
+  - Isometric modes: recommended max ~200×200
+  - Orthographic mode: recommended max ~250×250
+- The `exportToImage()` method includes validation and will return `null` if limits are exceeded
+- Consider exporting in orthographic mode for larger maps (smaller pixel dimensions)

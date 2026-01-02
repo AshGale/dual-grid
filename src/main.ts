@@ -70,7 +70,7 @@ let assetsLoaded = false;
 
 // Default terrain buckets - sorted by threshold (lowest to highest)
 const DEFAULT_BUCKETS: TerrainBucket[] = [
-    { name: 'Water', color: '#225588', threshold: -1.0, terrainType: TerrainType.Water },
+    { name: 'Shallow Water', color: '#225588', threshold: -1.0, terrainType: TerrainType.Water },
     { name: 'Sand', color: '#eebb44', threshold: -0.2, terrainType: TerrainType.Sand },
     { name: 'Dirt', color: '#885533', threshold: 0.0, terrainType: TerrainType.Dirt },
     { name: 'Grass', color: '#44aa44', threshold: 0.3, terrainType: TerrainType.Grass }
@@ -100,36 +100,34 @@ interface TileDebugInfo {
     }>;
 }
 
-let debugMode = false;
-let selectedTileDebugInfo: TileDebugInfo | null = null;
-
 // --- ASSET LOADING FUNCTIONS ---
 async function loadTerrainAssets(): Promise<void> {
     console.log("Starting to load terrain assets...");
     // Derive terrain names from DEFAULT_BUCKETS to support dynamic terrain types
     const promises = DEFAULT_BUCKETS.map(async (bucket) => {
-        const name = bucket.name.toLowerCase();
+        // Convert bucket name to folder name (lowercase with spaces as hyphens)
+        const folderName = bucket.name.toLowerCase().replace(/\s+/g, '-');
         const terrainType = bucket.terrainType;
-        console.log(`Loading ${name}...`);
+        console.log(`Loading ${folderName}...`);
 
         // Load image
         const img = new Image();
         const imgPromise = new Promise<void>((resolve, reject) => {
             img.onload = () => {
-                console.log(`${name}.png loaded successfully`);
+                console.log(`${folderName}.png loaded successfully`);
                 resolve();
             };
             img.onerror = (e) => {
-                console.error(`Failed to load ${name}.png:`, e);
+                console.error(`Failed to load ${folderName}.png:`, e);
                 reject(e);
             };
-            img.src = `/${name}/${name}.png`;
+            img.src = `/${folderName}/${folderName}.png`;
         });
 
         // Load wang data
-        const response = await fetch(`/${name}/${name}.txt`);
+        const response = await fetch(`/${folderName}/${folderName}.txt`);
         const wangData: WangTileData = await response.json();
-        console.log(`${name}.txt loaded:`, wangData);
+        console.log(`${folderName}.txt loaded:`, wangData);
 
         await imgPromise;
 
@@ -147,7 +145,7 @@ async function loadTerrainAssets(): Promise<void> {
             roleToId
         });
 
-        console.log(`${name} assets stored for terrain type ${terrainType}`);
+        console.log(`${folderName} assets stored for terrain type ${terrainType}`);
     });
 
     await Promise.all(promises);
@@ -1419,7 +1417,6 @@ function handleTileClick(e: MouseEvent) {
     if (gridCoords) {
         const debugInfo = grid.getDebugInfo(gridCoords.x, gridCoords.y);
         if (debugInfo) {
-            selectedTileDebugInfo = debugInfo;
             grid.setDebugTile(gridCoords.x, gridCoords.y);
             displayDebugInfo(debugInfo);
             debugPanel.classList.add('open');
